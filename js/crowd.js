@@ -20,21 +20,20 @@ export class Crowd {
     this.scene = scene;
 
     const count = 400;
-    const headGeo = new THREE.SphereGeometry(0.15, 8, 8);
-    headGeo.translate(0, 0.65, 0);
-    const torsoGeo = new THREE.CylinderGeometry(0.1, 0.2, 0.6, 8);
-    torsoGeo.translate(0, 0.3, 0);
-
-    // Simple substitute for merge
-    const geo = new THREE.CylinderGeometry(0.15, 0.25, 0.8, 8);
-    geo.translate(0, 0.4, 0);
+    const bodyGeo = new THREE.CapsuleGeometry(0.16, 0.42, 4, 12);
+    bodyGeo.translate(0, 0.52, 0);
+    const headGeo = new THREE.SphereGeometry(0.22, 16, 16);
+    headGeo.translate(0, 1.12, 0);
 
     const mat = new THREE.MeshStandardMaterial({
       color: 0xffffff, // Set white so vertex colors multiply correctly
       roughness: 0.9,
     });
-    this.mesh = new THREE.InstancedMesh(geo, mat, count);
-    this.scene.add(this.mesh);
+    this.bodyMesh = new THREE.InstancedMesh(bodyGeo, mat, count);
+    this.headMesh = new THREE.InstancedMesh(headGeo, mat, count);
+    this.mesh = this.bodyMesh;
+    this.scene.add(this.bodyMesh);
+    this.scene.add(this.headMesh);
 
     const sides = [
       { dir: [0, 1], start: [-5, 5] },
@@ -103,15 +102,21 @@ export class Crowd {
       this.dummy.scale.set(scale, scale, scale);
       this.dummy.rotation.set(0, this.spectators[i].rotY, 0);
       this.dummy.updateMatrix();
-      this.mesh.setMatrixAt(i, this.dummy.matrix);
+      this.bodyMesh.setMatrixAt(i, this.dummy.matrix);
+      this.headMesh.setMatrixAt(i, this.dummy.matrix);
 
       // Fade out to black/background based on row distance
       const fadeRatio = row / 8.0; // row goes 0 to 9
       tempColor.copy(litColor).lerp(bgDark, fadeRatio);
-      this.mesh.setColorAt(i, tempColor);
+      this.bodyMesh.setColorAt(i, tempColor);
+      this.headMesh.setColorAt(i, tempColor);
     }
-    this.mesh.instanceMatrix.needsUpdate = true;
-    if (this.mesh.instanceColor) this.mesh.instanceColor.needsUpdate = true;
+    this.bodyMesh.instanceMatrix.needsUpdate = true;
+    this.headMesh.instanceMatrix.needsUpdate = true;
+    if (this.bodyMesh.instanceColor)
+      this.bodyMesh.instanceColor.needsUpdate = true;
+    if (this.headMesh.instanceColor)
+      this.headMesh.instanceColor.needsUpdate = true;
   }
 
   setState(state) {
@@ -144,7 +149,7 @@ export class Crowd {
   }
 
   update(dt) {
-    if (!this.mesh) return;
+    if (!this.bodyMesh || !this.headMesh) return;
     this.time += dt;
 
     if (this.state === "WILD") {
@@ -217,8 +222,10 @@ export class Crowd {
       this.dummy.scale.set(s, s, s);
       this.dummy.rotation.set(spec.rotX, spec.rotY, 0);
       this.dummy.updateMatrix();
-      this.mesh.setMatrixAt(i, this.dummy.matrix);
+      this.bodyMesh.setMatrixAt(i, this.dummy.matrix);
+      this.headMesh.setMatrixAt(i, this.dummy.matrix);
     }
-    this.mesh.instanceMatrix.needsUpdate = true;
+    this.bodyMesh.instanceMatrix.needsUpdate = true;
+    this.headMesh.instanceMatrix.needsUpdate = true;
   }
 }
