@@ -1,3 +1,4 @@
+
 <!DOCTYPE html>
 <html lang="en">
 
@@ -501,6 +502,27 @@
             justify-content: space-between;
         }
 
+        .sidebar-search {
+            padding: 10px;
+            background: rgba(10, 10, 10, 0.9);
+            border-bottom: 1px solid #333;
+        }
+
+        .sidebar-search input {
+            width: 100%;
+            padding: 8px 12px;
+            background: rgba(255, 255, 255, 0.1);
+            border: 1px solid #444;
+            border-radius: 4px;
+            color: #fff;
+            font-family: 'Arial', sans-serif;
+        }
+
+        .sidebar-search input:focus {
+            outline: none;
+            border-color: #ff3333;
+        }
+
         .player-list {
             overflow-y: auto;
             flex: 1;
@@ -782,7 +804,7 @@
                         </li>
                         <li>Blocking: Reduces incoming damage but prevents the user from attacking during this time</li>
                         <li>Dodge Mechanic:
-                            <br>- Tilt the phone left/right to dodge
+                            <br>- Tilt the phone left/right/back to dodge
                             <br>- If a strike is successfully dodged, you will charge up both your stamina and combo!
                         </li>
                     </ul>
@@ -793,7 +815,7 @@
         <!-- Leaderboard Page -->
         <div id="leaderboard" class="page">
             <h2 style="text-align: center; margin-bottom: 20px; color: #ff3333;">Global Leaderboard</h2>
-            
+
             <div class="leaderboard-container">
                 <!-- Sidebar -->
                 <div class="leaderboard-sidebar">
@@ -801,122 +823,24 @@
                         <span>Rank & Player</span>
                         <span>Rating</span>
                     </div>
-                    <div class="player-list">
-                        <div class="player-row active">
-                            <span class="player-rank">1</span>
-                            <span class="player-flag">🇬🇧</span>
-                            <span class="player-name">edcr</span>
-                            <span class="player-elo">2016</span>
-                        </div>
-                        <div class="player-row">
-                            <span class="player-rank">2</span>
-                            <span class="player-flag">🇺🇸</span>
-                            <span class="player-name">Feinberg</span>
-                            <span class="player-elo">1910</span>
-                        </div>
-                        <div class="player-row">
-                            <span class="player-rank">3</span>
-                            <span class="player-flag">🇨🇦</span>
-                            <span class="player-name">lowk3y_</span>
-                            <span class="player-elo">1907</span>
-                        </div>
-                        <div class="player-row">
-                            <span class="player-rank">4</span>
-                            <span class="player-flag">🇺🇸</span>
-                            <span class="player-name">Infume</span>
-                            <span class="player-elo">1882</span>
-                        </div>
-                        <div class="player-row">
-                            <span class="player-rank">5</span>
-                            <span class="player-flag">🇳🇱</span>
-                            <span class="player-name">HDMICables</span>
-                            <span class="player-elo">1837</span>
-                        </div>
-                        <div class="player-row">
-                            <span class="player-rank">6</span>
-                            <span class="player-flag">🇵🇱</span>
-                            <span class="player-name">Watermelon1708</span>
-                            <span class="player-elo">1822</span>
-                        </div>
-                        <div class="player-row">
-                            <span class="player-rank">7</span>
-                            <span class="player-flag">🇬🇧</span>
-                            <span class="player-name">BeefSalad</span>
-                            <span class="player-elo">1818</span>
-                        </div>
-                        <div class="player-row">
-                            <span class="player-rank">8</span>
-                            <span class="player-flag">🇨🇦</span>
-                            <span class="player-name">BadGamer</span>
-                            <span class="player-elo">1789</span>
-                        </div>
-                        <div class="player-row">
-                            <span class="player-rank">9</span>
-                            <span class="player-flag">🇺🇸</span>
-                            <span class="player-name">nEmerald</span>
-                            <span class="player-elo">1784</span>
-                        </div>
-                        <div class="player-row">
-                            <span class="player-rank">10</span>
-                            <span class="player-flag">🇺🇸</span>
-                            <span class="player-name">nahhann</span>
-                            <span class="player-elo">1777</span>
-                        </div>
+                    <div class="sidebar-search">
+                        <input type="text" id="playerSearch" placeholder="Search player..." onkeyup="filterPlayers()">
+                    </div>
+                    <div class="player-list" id="playerList">
+                        <!-- Dynamic content -->
                     </div>
                 </div>
 
                 <!-- Main Profile Area -->
                 <div class="leaderboard-main">
-                    <div class="profile-header">
-                        <div class="profile-top">
-                            <span class="profile-rank">#1</span>
-                            <span class="player-flag" style="font-size: 24px;">🇬🇧</span>
-                            <span class="profile-name">edcr <span class="profile-tier">🥊 Undisputed (2016 elo)</span></span>
-                        </div>
-                        <div class="profile-stats">
-                            <span><strong>86%</strong> winrate</span> •
-                            <span><strong>2,912</strong> wins</span> •
-                            <span><strong>2,457</strong> KOs</span> •
-                            <span><strong>13</strong> best winstreak</span>
-                        </div>
+                    <div class="profile-header" id="profileHeader">
+                        <!-- Dynamic content -->
                     </div>
 
                     <div class="matches-section">
                         <h3>Recent Matches</h3>
-                        <div class="match-row">
-                            <span class="match-opponent">vorbh</span>
-                            <span class="match-result won">WON</span>
-                            <span class="match-time">1st Round KO</span>
-                        </div>
-                        <div class="match-row">
-                            <span class="match-opponent">Aquacorde</span>
-                            <span class="match-result won">WON</span>
-                            <span class="match-time">Decision</span>
-                        </div>
-                        <div class="match-row">
-                            <span class="match-opponent">BeefSalad</span>
-                            <span class="match-result won">WON</span>
-                            <span class="match-time">2nd Round KO</span>
-                        </div>
-                        <div class="match-row">
-                            <span class="match-opponent">romuxii</span>
-                            <span class="match-result won">WON</span>
-                            <span class="match-time">Decision</span>
-                        </div>
-                        <div class="match-row">
-                            <span class="match-opponent">bing_pigs</span>
-                            <span class="match-result won">WON</span>
-                            <span class="match-time">Decision</span>
-                        </div>
-                        <div class="match-row">
-                            <span class="match-opponent">lowk3y_</span>
-                            <span class="match-result lost">LOST</span>
-                            <span class="match-time">Decision</span>
-                        </div>
-                        <div class="match-row">
-                            <span class="match-opponent">Ranik_</span>
-                            <span class="match-result won">WON</span>
-                            <span class="match-time">3rd Round KO</span>
+                        <div id="matchesList">
+                            <!-- Dynamic content -->
                         </div>
                     </div>
                 </div>
@@ -986,6 +910,121 @@
                 joinMatch();
             }
         });
+
+        // Leaderboard logic
+        const playersData = [
+            { rank: 1, flag: '🇬🇧', name: 'edcr', elo: 2016, winrate: '86%', wins: '2,912', kos: '2,457', streak: 13, tier: '🥊 Undisputed' },
+            { rank: 2, flag: '🇺🇸', name: 'Feinberg', elo: 1910, winrate: '82%', wins: '1,540', kos: '1,200', streak: 8, tier: '🥊 Champion' },
+            { rank: 3, flag: '🇨🇦', name: 'lowk3y_', elo: 1907, winrate: '80%', wins: '1,420', kos: '1,100', streak: 7, tier: '🥊 Contender' },
+            { rank: 4, flag: '🇺🇸', name: 'Infume', elo: 1882, winrate: '78%', wins: '1,300', kos: '950', streak: 6, tier: '🥊 Contender' },
+            { rank: 5, flag: '🇳🇱', name: 'HDMICables', elo: 1837, winrate: '75%', wins: '1,100', kos: '800', streak: 5, tier: '🥊 Diamond' },
+            { rank: 6, flag: '🇵🇱', name: 'Watermelon1708', elo: 1822, winrate: '74%', wins: '1,050', kos: '750', streak: 4, tier: '🥊 Diamond' },
+            { rank: 7, flag: '🇬🇧', name: 'BeefSalad', elo: 1818, winrate: '73%', wins: '1,000', kos: '700', streak: 4, tier: '🥊 Diamond' },
+            { rank: 8, flag: '🇨🇦', name: 'BadGamer', elo: 1789, winrate: '70%', wins: '900', kos: '600', streak: 3, tier: '🥊 Platinum' },
+            { rank: 9, flag: '🇺🇸', name: 'nEmerald', elo: 1784, winrate: '69%', wins: '850', kos: '550', streak: 3, tier: '🥊 Platinum' },
+            { rank: 10, flag: '🇺🇸', name: 'nahhann', elo: 1777, winrate: '68%', wins: '800', kos: '500', streak: 2, tier: '🥊 Platinum' }
+        ];
+
+        let activePlayerName = 'edcr';
+
+        function renderPlayers(filterText = '') {
+            const playerList = document.getElementById('playerList');
+            if (!playerList) return;
+            playerList.innerHTML = '';
+            
+            const filtered = playersData.filter(p => p.name.toLowerCase().includes(filterText.toLowerCase()));
+            
+            filtered.forEach(p => {
+                const row = document.createElement('div');
+                row.className = `player-row ${p.name === activePlayerName ? 'active' : ''}`;
+                row.onclick = () => selectPlayer(p.name);
+                row.innerHTML = `
+                    <span class="player-rank">${p.rank}</span>
+                    <span class="player-flag">${p.flag}</span>
+                    <span class="player-name">${p.name}</span>
+                    <span class="player-elo">${p.elo}</span>
+                `;
+                playerList.appendChild(row);
+            });
+        }
+
+        function filterPlayers() {
+            const text = document.getElementById('playerSearch').value;
+            renderPlayers(text);
+        }
+
+        function selectPlayer(name) {
+            activePlayerName = name;
+            renderPlayers(document.getElementById('playerSearch').value || '');
+            updateProfile(name);
+        }
+
+        function generateMatchesForPlayer(playerName) {
+            if (playerName === 'edcr') {
+                return [
+                    { opponent: 'vorbh', result: 'WON', method: 'KO' },
+                    { opponent: 'Aquacorde', result: 'WON', method: 'Decision' },
+                    { opponent: 'BeefSalad', result: 'WON', method: 'KO' },
+                    { opponent: 'romuxii', result: 'WON', method: 'Decision' },
+                    { opponent: 'bing_pigs', result: 'WON', method: 'Decision' },
+                    { opponent: 'lowk3y_', result: 'LOST', method: 'Decision' },
+                    { opponent: 'Ranik_', result: 'WON', method: 'KO' }
+                ];
+            }
+            
+            const opponents = playersData.filter(p => p.name !== playerName).map(p => p.name);
+            const matches = [];
+            let seed = playerName.length; 
+            const random = () => {
+                let x = Math.sin(seed++) * 10000;
+                return x - Math.floor(x);
+            };
+
+            for(let i=0; i<7; i++) {
+                const opp = opponents[Math.floor(random() * opponents.length)];
+                const won = random() > 0.3;
+                const method = random() > 0.5 ? 'KO' : 'Decision';
+                matches.push({ opponent: opp, result: won ? 'WON' : 'LOST', method: method });
+            }
+            return matches;
+        }
+
+        function updateProfile(name) {
+            const player = playersData.find(p => p.name === name);
+            if (!player) return;
+
+            const profileHeader = document.getElementById('profileHeader');
+            if (profileHeader) {
+                profileHeader.innerHTML = `
+                    <div class="profile-top">
+                        <span class="profile-rank">#${player.rank}</span>
+                        <span class="player-flag" style="font-size: 24px;">${player.flag}</span>
+                        <span class="profile-name">${player.name} <span class="profile-tier">${player.tier} (${player.elo} Rating)</span></span>
+                    </div>
+                    <div class="profile-stats">
+                        <span><strong>${player.winrate}</strong> winrate</span> •
+                        <span><strong>${player.wins}</strong> wins</span> •
+                        <span><strong>${player.kos}</strong> KOs</span> •
+                        <span><strong>${player.streak}</strong> best winstreak</span>
+                    </div>
+                `;
+            }
+
+            const matchesList = document.getElementById('matchesList');
+            if (matchesList) {
+                const matches = generateMatchesForPlayer(name);
+                matchesList.innerHTML = matches.map(m => `
+                    <div class="match-row">
+                        <span class="match-opponent">${m.opponent}</span>
+                        <span class="match-result ${m.result === 'WON' ? 'won' : 'lost'}">${m.result}</span>
+                        <span class="match-time">${m.method}</span>
+                    </div>
+                `).join('');
+            }
+        }
+
+        renderPlayers();
+        updateProfile('edcr');
     </script>
 </body>
 
