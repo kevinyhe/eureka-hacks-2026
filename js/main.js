@@ -1043,9 +1043,6 @@ function endRound(reason, forcedWinner) {
   lastTickedSecond = null;
   const timerEl = document.getElementById('round-timer');
   if (timerEl) timerEl.classList.remove('danger');
-  // Pull the game-active class off the body so HP / stamina / combo bars
-  // fade out for KO, time-out, AND draw endings.
-  document.body.classList.remove('game-active');
   // Phones: clear no-block + tell their isBlockingLocal flags to drop.
   notifyPlayer('P1', 'no_block_phase', { active: false });
   notifyPlayer('P2', 'no_block_phase', { active: false });
@@ -1987,15 +1984,12 @@ function processActions(p, defender, time, deltaTime) {
   }
 
   if (!p.state.isKnockedOut && p.state.stamina < STAMINA_MAX) {
-    let staminaRegen =
+    const staminaRegen =
       activeAction === "idle"
         ? STAMINA_REGEN_IDLE
         : activeAction === "block"
           ? 5
           : STAMINA_REGEN_BUSY;
-    // Double regen during the last-15s no-block phase so players can
-    // throw freely once defense is disabled.
-    if (noBlockActive) staminaRegen *= 2;
     p.state.stamina = Math.min(
       STAMINA_MAX,
       p.state.stamina + staminaRegen * deltaTime,
@@ -2165,26 +2159,16 @@ const KO_PAN_RADIUS        = 3.6;
 const KO_PAN_HEIGHT        = 1.85;
 const KO_PAN_LOOK_HEIGHT   = 1.05;
 const KO_PAN_ANGULAR_SPEED = 0.35;   // rad/sec — full orbit ≈ 14 s
-// Width of the orbit-camera viewport during the seam-slide phase.
-// Starts at half-screen (left half = orbit camera, right half = camera2),
-// expands to full-screen over KO_PAN_SEAM_MS, then orbit-only.
-const KO_PAN_SEAM_MS = 1100;
-
-// Match camera1's FOV (60°) so the first frame of the pan looks identical
-// to what was being shown in camera1's left-half viewport.
-const koPanCamera = new THREE.PerspectiveCamera(60, 1, 0.1, 100);
+const koPanCamera = new THREE.PerspectiveCamera(50, 1, 0.1, 100);
 let koPanActive   = false;
 let koPanStartedAt = 0;
 let koPanWinner   = null;
 let koPanScheduledTimer = 0;
 const koPanStartCamPos = new THREE.Vector3();
-const koPanStartCamQuat = new THREE.Quaternion();
-// Reusable scratch object for computing target lookAt quaternions.
-const _koPanTempObj = new THREE.Object3D();
 
-// Schedule the pan to take over rendering after KO_PAN_DELAY_MS. Always
-// captures camera1 (P1's perspective) — by spec the pan begins on P1's
-// side of the screen regardless of who won.
+// Schedule the pan to take over rendering after KO_PAN_DELAY_MS. Captures
+// the winner's current view-camera position at the moment of switch so the
+// orbit can ease out from that exact viewpoint, no fade required.
 function scheduleKOPan(winnerPlayer, reasonText) {
   if (!winnerPlayer) return;
   if (koPanScheduledTimer) clearTimeout(koPanScheduledTimer);
@@ -2193,11 +2177,11 @@ function scheduleKOPan(winnerPlayer, reasonText) {
     koPanScheduledTimer = 0;
     koPanWinner = winnerPlayer;
     koPanStartedAt = performance.now();
-    // Snapshot camera1's exact pose at the moment of switch. The orbit
-    // camera starts identical to camera1 (so the left half of the screen
-    // looks unchanged), then eases toward its orbit position+orientation.
-    koPanStartCamPos.copy(camera1.position);
-    koPanStartCamQuat.copy(camera1.quaternion);
+    // Snapshot the winner's existing view-camera position. The orbit
+    // camera will ease from this towards its orbit-formula target over
+    // KO_PAN_EASE_MS, giving a smooth pan-out without any cut.
+    const startCam = (winnerPlayer === player1) ? camera1 : camera2;
+    koPanStartCamPos.copy(startCam.position);
     koPanActive = true;
     enterPanLayout(playerSlot(winnerPlayer), reasonText || 'KO');
   }, KO_PAN_DELAY_MS);
@@ -2296,9 +2280,7 @@ function animate() {
   const halfW = Math.floor(w / 2);
 
   if (koPanActive && koPanWinner) {
-    // Cinematic — starts split-screen with the orbit camera taking over
-    // the left half (matching camera1's pose exactly), then the seam
-    // slides right while the orbit camera eases toward its orbit pose.
+    // Full-screen orbit cinematic around the winner.
     const winnerPos = koPanWinner.rootGroup.position;
     const nowMs = performance.now();
     const elapsedMs = nowMs - koPanStartedAt;
@@ -2309,8 +2291,9 @@ function animate() {
     const targetY = KO_PAN_HEIGHT;
     const targetZ = winnerPos.z + Math.sin(angle) * KO_PAN_RADIUS;
 
-    // Ease pose: position lerp + quaternion slerp from the captured
-    // camera1 pose toward (orbitTarget, lookAt(winner)).
+    // Ease the camera position from the captured snapshot toward the orbit
+    // target. easeOutCubic gives most of the motion up front, settling into
+    // a steady orbit by the end of the window.
     const easeT = Math.min(1, elapsedMs / KO_PAN_EASE_MS);
     const t = easeOutCubic(easeT);
     koPanCamera.position.set(
@@ -2318,49 +2301,21 @@ function animate() {
       koPanStartCamPos.y + (targetY - koPanStartCamPos.y) * t,
       koPanStartCamPos.z + (targetZ - koPanStartCamPos.z) * t,
     );
-    // Build the orbit-target orientation by hand (lookAt at the target
-    // position) so we can slerp from camera1's start orientation toward it.
-    _koPanTempObj.position.set(targetX, targetY, targetZ);
-    _koPanTempObj.lookAt(winnerPos.x, KO_PAN_LOOK_HEIGHT, winnerPos.z);
-    koPanCamera.quaternion.copy(koPanStartCamQuat);
-    koPanCamera.quaternion.slerp(_koPanTempObj.quaternion, t);
-
-    // Seam slide: orbit-camera viewport width grows from halfW to w.
-    const seamT = Math.min(1, elapsedMs / KO_PAN_SEAM_MS);
-    const seamE = easeOutCubic(seamT);
-    const orbitW   = Math.floor(halfW + (w - halfW) * seamE);
-    const cam2W    = w - orbitW;
+    koPanCamera.lookAt(winnerPos.x, KO_PAN_LOOK_HEIGHT, winnerPos.z);
 
     // Both players visible at full size for the cinematic.
     setPlayerViewMode(player1, true);
     setPlayerViewMode(player2, true);
 
-    // Orbit camera aspect tracks its viewport.
-    const orbitAspect = orbitW / h;
-    if (Math.abs(koPanCamera.aspect - orbitAspect) > 0.001) {
-      koPanCamera.aspect = orbitAspect;
+    if (koPanCamera.aspect !== w / h) {
+      koPanCamera.aspect = w / h;
       koPanCamera.updateProjectionMatrix();
     }
-
-    // LEFT slice — orbit camera.
-    renderer.setViewport(0, 0, orbitW, h);
-    renderer.setScissor(0, 0, orbitW, h);
+    renderer.setViewport(0, 0, w, h);
+    renderer.setScissor(0, 0, w, h);
     renderer.setClearColor(0x87ceeb);
     renderer.clear();
     renderer.render(scene, koPanCamera);
-
-    // RIGHT slice — camera2 (loser's view), only while the seam hasn't
-    // fully reached the right edge.
-    if (cam2W > 0) {
-      renderer.setViewport(orbitW, 0, cam2W, h);
-      renderer.setScissor(orbitW, 0, cam2W, h);
-      renderer.setClearColor(0x87ceeb);
-      renderer.clear();
-      // Set view modes for camera2's perspective.
-      setPlayerViewMode(player2, true);
-      setPlayerViewMode(player1, false);
-      renderer.render(scene, camera2);
-    }
     return;
   }
 
