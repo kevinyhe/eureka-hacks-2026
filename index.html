@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Wii Boxing Emulator</title>
+   <title>Wii Boxing Emulator</title>
     <style>
       body {
         margin: 0;
@@ -68,11 +68,25 @@
         z-index: 90;
         transition: opacity 0.1s;
       }
+      .blackout-overlay {
+        position: absolute;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        background: #000;
+        opacity: 0;
+        pointer-events: none;
+        z-index: 92;
+        transition: opacity 0.08s linear;
+      }
     </style>
   </head>
   <body>
     <div id="flash-p1" class="hit-flash" style="right: 50%"></div>
     <div id="flash-p2" class="hit-flash" style="left: 50%"></div>
+    <div id="blackout-p1" class="blackout-overlay" style="right: 50%"></div>
+    <div id="blackout-p2" class="blackout-overlay" style="left: 50%"></div>
     <div id="info">
       <div class="hud-p1">
         Player 1<br />
@@ -221,8 +235,8 @@
             width: "100%",
             height: "100%",
             background: `
-              radial-gradient(circle at center, transparent 40%, rgba(0,0,0,0.65) 100%),
-              radial-gradient(circle at center, rgba(255,255,255,0.06) 0%, transparent 20%),
+              radial-gradient(circle at center, transparent 40%, rgba(0,0,0,1) 100%),
+              radial-gradient(circle at center, rgba(255,255,255,0.12) 0%, transparent 20%),
               rgba(0, 15, 10, 0.1)
             `,
             mixBlendMode: "multiply",
@@ -421,31 +435,31 @@
       const ACTIONS = {
         idle: { duration: 0, l: GLOVE_IDLE_L, r: GLOVE_IDLE_R, damage: 0 },
         jab: {
-          duration: 0.15,
+          duration: 0.08,
           l: new THREE.Vector3(-0.1, 1.2, 2.0),
           r: GLOVE_IDLE_R,
           damage: 5,
         },
         hook: {
-          duration: 0.25,
+          duration: 0.14,
           l: GLOVE_IDLE_L,
           r: new THREE.Vector3(-0.4, 1.2, 1.8),
           damage: 15,
         },
         uppercut: {
-          duration: 0.3,
+          duration: 0.18,
           l: GLOVE_IDLE_L,
           r: new THREE.Vector3(0.1, 2.0, 1.6),
           damage: 20,
         },
         block: {
-          duration: 0.2,
+          duration: 0.12,
           l: new THREE.Vector3(-0.15, 1.3, 0.6),
           r: new THREE.Vector3(0.15, 1.3, 0.6),
           damage: 0,
         },
         heal: {
-          duration: 0.8,
+          duration: 0.45,
           l: new THREE.Vector3(-0.2, 1.6, 0.4),
           r: new THREE.Vector3(0.2, 1.6, 0.4),
           damage: 0,
@@ -453,7 +467,7 @@
       };
 
       // 2. Setup Players (Wii-like avatars: Head, Body, disconnected Gloves)
-      const createPlayer = (color, domHpId, domFlashId) => {
+      const createPlayer = (color, domHpId, domFlashId, domBlackoutId) => {
         const rootGroup = new THREE.Group();
         const avatarGroup = new THREE.Group();
         rootGroup.add(avatarGroup);
@@ -513,28 +527,35 @@
             camRot: new THREE.Vector3(), // using Vector3 for Euler angles xyz
             camRotVel: new THREE.Vector3(),
             camRotTarget: new THREE.Vector3(),
+            lookOffset: new THREE.Vector3(),
+            lookVel: new THREE.Vector3(),
+            lookTarget: new THREE.Vector3(),
             spineRot: new THREE.Vector3(),
             spineVel: new THREE.Vector3(),
             spineTarget: new THREE.Vector3(),
           },
+          uiBlackout: document.getElementById(domBlackoutId),
           state: {
             action: "idle",
             timer: 0,
             hitLanded: false,
             health: 100,
             shakeTimer: 0,
+            camChaosTimer: 0,
+            blackoutTimeout: null,
+            isKnockedOut: false,
           },
         };
       };
 
       // Player 1 (Red)
-      const player1 = createPlayer(0xff3333, "hp-p1", "flash-p1");
+      const player1 = createPlayer(0xff3333, "hp-p1", "flash-p1", "blackout-p1");
       player1.rootGroup.position.set(0, 0, 1.2);
       player1.rootGroup.rotation.y = Math.PI; // Face Player 2
       scene.add(player1.rootGroup);
 
       // Player 2 (Blue)
-      const player2 = createPlayer(0x3333ff, "hp-p2", "flash-p2");
+      const player2 = createPlayer(0x3333ff, "hp-p2", "flash-p2", "blackout-p2");
       player2.rootGroup.position.set(0, 0, -1.2);
       // Player 2 faces +z by default, looking towards Player 1
       scene.add(player2.rootGroup);
@@ -557,28 +578,36 @@
         const p1WorldPos = player1.rootGroup.position;
         const p1TargetPos = player2.rootGroup.position;
         camera1.position.set(
-          p1WorldPos.x - 0.4 + player1.physics.camPos.x,
-          2.1 + player1.physics.camPos.y,
-          p1WorldPos.z + 1.2 + player1.physics.camPos.z,
+          p1WorldPos.x - 0.6 + player1.physics.camPos.x,
+          2.125 + player1.physics.camPos.y,
+          p1WorldPos.z + 1.0 + player1.physics.camPos.z,
         );
-        camera1.lookAt(p1TargetPos.x, 1.2, p1TargetPos.z);
+        camera1.lookAt(
+          p1TargetPos.x + player1.physics.lookOffset.x,
+          1.2 + player1.physics.lookOffset.y,
+          p1TargetPos.z + player1.physics.lookOffset.z,
+        );
         // Apply procedural rotation shake
-        camera1.rotation.x += player1.physics.camRot.x * 0.05;
-        camera1.rotation.y += player1.physics.camRot.y * 0.05;
-        camera1.rotation.z += player1.physics.camRot.z * 0.05;
+        camera1.rotation.x += player1.physics.camRot.x * 0.6;
+        camera1.rotation.y += player1.physics.camRot.y * 0.6;
+        camera1.rotation.z += player1.physics.camRot.z * 0.6;
 
-        // Player 2 View - Sit slightly right shoulder (since facing -z)
+        // p2 viewpoint
         const p2WorldPos = player2.rootGroup.position;
         const p2TargetPos = player1.rootGroup.position;
         camera2.position.set(
-          p2WorldPos.x + 0.4 + player2.physics.camPos.x,
-          2.1 + player2.physics.camPos.y,
-          p2WorldPos.z - 1.2 + player2.physics.camPos.z,
+          p2WorldPos.x + 0.6 + player2.physics.camPos.x,
+          2.125 + player2.physics.camPos.y,
+          p2WorldPos.z - 1.0 + player2.physics.camPos.z,
         );
-        camera2.lookAt(p2TargetPos.x, 1.2, p2TargetPos.z);
-        camera2.rotation.x += player2.physics.camRot.x * 0.05;
-        camera2.rotation.y += player2.physics.camRot.y * 0.05;
-        camera2.rotation.z += player2.physics.camRot.z * 0.05;
+        camera2.lookAt(
+          p2TargetPos.x + player2.physics.lookOffset.x,
+          1.2 + player2.physics.lookOffset.y,
+          p2TargetPos.z + player2.physics.lookOffset.z,
+        );
+        camera2.rotation.x += player2.physics.camRot.x * 0.6;
+        camera2.rotation.y += player2.physics.camRot.y * 0.6;
+        camera2.rotation.z += player2.physics.camRot.z * 0.6;
       }
 
       // ------------------------------------------------------------
@@ -587,7 +616,7 @@
       window.addEventListener("keydown", (e) => {
         const setAction = (p, action) => {
           // Allow overriding idle, or interrupting if we want
-          if (p.state.action === "idle") {
+          if (p.state.action === "idle" && !p.state.isKnockedOut) {
             p.state.action = action;
             p.state.timer = ACTIONS[action].duration;
             p.state.hitLanded = false; // reset hit flag
@@ -649,12 +678,12 @@
 
       function setPlayerViewMode(p, isFront) {
         if (isFront) {
-          p.head.material.transparent = true;
+          p.head.material.transparent = false;
           p.head.material.opacity = 0.2;
-          p.body.material.transparent = true;
+          p.body.material.transparent = false;
           p.body.material.opacity = 0.2;
           // Move front character down and keep normal scale
-          p.avatarGroup.position.y = -0.5;
+          // p.avatarGroup.position.y = -0.5;
           p.avatarGroup.scale.set(1.0, 1.0, 1.0);
         } else {
           p.head.material.transparent = false;
@@ -666,58 +695,98 @@
           p.avatarGroup.scale.set(1.4, 1.4, 1.4);
         }
       }
+      function triggerBlackout(player, intensity, durationMs) {
+        if (!player.uiBlackout) return;
+        player.uiBlackout.style.opacity = `${THREE.MathUtils.clamp(intensity, 0, 0.98)}`;
+        if (player.state.blackoutTimeout) {
+          clearTimeout(player.state.blackoutTimeout);
+          player.state.blackoutTimeout = null;
+        }
+        if (durationMs > 0) {
+          player.state.blackoutTimeout = setTimeout(() => {
+            player.uiBlackout.style.opacity = "0";
+            player.state.blackoutTimeout = null;
+          }, durationMs);
+        }
+      }
 
       function triggerHitNode(defender, damage, attackType = "jab") {
         if (defender.state.action === "block") return; // No damage if blocking!
 
         defender.state.health = Math.max(0, defender.state.health - damage);
         defender.uiHp.style.width = defender.state.health + "%";
-        defender.state.shakeTimer = 0.2; // 0.2 seconds of screen shake
+        defender.state.shakeTimer = 0.35;
 
         // Trigger the Camera Hit physically based on the attack received
         let hitPower = damage / 20; // 0 to 1 based on damage max
 
         // Apply physical impulse to the defender's camera and spine (ragdoll effect)
-        let camImpulseX = (Math.random() - 0.5) * 4.0 * hitPower;
-        let camImpulseY = (Math.random() - 0.5) * 4.0 * hitPower;
+        let camImpulseX = (Math.random() - 0.5) * 18.0 * hitPower;
+        let camImpulseY = (Math.random() - 0.5) * 16.0 * hitPower;
+        let camImpulseZ = (Math.random() - 0.5) * 24.0 * hitPower;
         let spineImpulseX = 0;
         let spineImpulseZ = 0;
+        let spineImpulseY = 0;
 
-        if (attackType === "hook") {
-          camImpulseX = (Math.random() > 0.5 ? -1 : 1) * 8.0 * hitPower;
-          spineImpulseZ = camImpulseX * 0.2; // Twist sideways
+        if (attackType === "jab") {
+          camImpulseX = -5.0 * hitPower;
+          spineImpulseX = -5.0 * hitPower; // Bend backwards slightly
+                    spineImpulseZ = camImpulseX * 0.6; // Twist sideways
+
+          camImpulseZ = -5 * hitPower;
+        }
+        else if (attackType === "hook") {
+          camImpulseX = -12.0 * hitPower;
+          spineImpulseZ = camImpulseX * 0.6; // Twist sideways
+          camImpulseZ = -3 * hitPower;
+
         } else if (attackType === "uppercut") {
-          camImpulseY = 10.0 * hitPower;
-          spineImpulseX = -1.5 * hitPower; // Bend backwards heavily
-        } else {
-          spineImpulseX = -0.8 * hitPower; // Bend backwards slightly (jab)
+          camImpulseY = -12.0 * hitPower;
+          camImpulseX = (Math.random() - 0.5) * -14.0 * hitPower;
+          spineImpulseY = -8.0 * hitPower;
+          spineImpulseX = -7.4 * hitPower; // Bend backwards heavily
+          camImpulseZ = -5 * hitPower;
         }
 
         defender.physics.camVel.x += camImpulseX;
         defender.physics.camVel.y += camImpulseY;
-        defender.physics.camRotVel.z += camImpulseX * 0.1;
-        defender.physics.camRotVel.x += camImpulseY * 0.1;
+        defender.physics.camVel.z += camImpulseZ;
+        defender.physics.camRotVel.z += camImpulseX * 0.5;
+        defender.physics.camRotVel.x += camImpulseY * 0.26;
+        defender.physics.camRotVel.y += camImpulseY * 0.37;
 
         defender.physics.spineVel.x += spineImpulseX;
         defender.physics.spineVel.z += spineImpulseZ;
+        defender.physics.spineVel.y += spineImpulseY;
+
+        triggerBlackout(
+          defender,
+          0.05 + hitPower * 0.55,
+          90 + Math.floor(hitPower * 130),
+        );
 
         if (defender.state.health <= 0) {
+          defender.state.isKnockedOut = true;
           defender.physics.spineTarget.set(-Math.PI / 2, 0, 0); // Knocked out, lay flat on ground
+          defender.physics.spineVel.x = -30; 
+          defender.physics.camVel.y -= 45;
+          defender.physics.camRotVel.x -= 30;
+          triggerBlackout(defender, 1, 0);
         }
 
-        // Flash material white temporarily
-        defender.head.material.color.setHex(0xffffff);
-        defender.body.material.color.setHex(0xffffff);
-        setTimeout(() => {
-          defender.head.material.color.setHex(defender.baseColor);
-          defender.body.material.color.setHex(defender.baseColor);
-        }, 100);
+        // // Flash material white temporarily
+        // defender.head.material.color.setHex(0xffffff);
+        // defender.body.material.color.setHex(0xffffff);
+        // setTimeout(() => {
+        //   defender.head.material.color.setHex(defender.baseColor);
+        //   defender.body.material.color.setHex(defender.baseColor);
+        // }, 50);
 
         // Screen space flash effect
         defender.uiFlash.style.opacity = "1";
         setTimeout(() => {
           defender.uiFlash.style.opacity = "0";
-        }, 150);
+        }, 75);
       }
 
       function processActions(p, defender, time, deltaTime) {
@@ -725,30 +794,61 @@
           p.state.shakeTimer -= deltaTime;
         }
 
+        p.state.camChaosTimer -= deltaTime;
+        const chaosScale = p.state.shakeTimer > 0 ? 1.8 : 1.0;
+        if (p.state.camChaosTimer <= 0) {
+          p.physics.camTarget.set(
+            (Math.random() - 0.5) * 0.7 * chaosScale,
+            (Math.random() - 0.5) * 0.5 * chaosScale,
+            (Math.random() - 0.5) * 0.45 * chaosScale,
+          );
+          p.physics.camRotTarget.set(
+            (Math.random() - 0.5) * 0.55 * chaosScale,
+            (Math.random() - 0.5) * 0.65 * chaosScale,
+            (Math.random() - 0.5) * 0.35 * chaosScale,
+          );
+          p.physics.lookTarget.set(
+            (Math.random() - 0.5) * 2.2 * chaosScale,
+            (Math.random() - 0.5) * 1.2 * chaosScale,
+            (Math.random() - 0.5) * 2.2 * chaosScale,
+          );
+          p.state.camChaosTimer = p.state.isKnockedOut
+            ? 0.03 + Math.random() * 0.05
+            : 0.05 + Math.random() * 0.12;
+        }
+
         // --- Physics Update (Virtual Ragdoll / Camera Springs) ---
-        // Return to 0 target quickly with friction
+        // Return to target quickly with friction
         updateSpring(
           p.physics.camPos,
           p.physics.camVel,
           p.physics.camTarget,
-          8.0,
-          0.85,
+          45.0,
+          0.82,
+          deltaTime,
+        );
+        updateSpring(
+          p.physics.lookOffset,
+          p.physics.lookVel,
+          p.physics.lookTarget,
+          13.0,
+          0.78,
           deltaTime,
         );
         updateSpring(
           p.physics.camRot,
           p.physics.camRotVel,
           p.physics.camRotTarget,
-          6.0,
-          0.9,
+          14.0,
+          0.8,
           deltaTime,
         );
         updateSpring(
           p.physics.spineRot,
           p.physics.spineVel,
           p.physics.spineTarget,
-          10.0,
-          0.8,
+          p.state.isKnockedOut ? 78.0 : 56.0,
+          p.state.isKnockedOut ? 0.62 : 0.73,
           deltaTime,
         );
 
@@ -761,9 +861,9 @@
 
         // Calculate procedural idle breathing for body/head
         p.avatarGroup.position.y =
-          p.state.action === "idle" ? Math.sin(time * 4) * 0.05 : 0;
+          p.state.action === "idle" ? Math.sin(time * 10) * 0.08 : 0;
 
-        if (p.state.action !== "idle") {
+        if (p.state.action !== "idle" && !p.state.isKnockedOut) {
           p.state.timer -= deltaTime;
 
           // Check hit logic at peak extension (timer is about half of duration)
@@ -800,22 +900,22 @@
         let targetR = GLOVE_IDLE_R.clone();
 
         if (p.state.action === "idle") {
-          targetL.y += Math.sin(time * 5) * 0.1;
-          targetR.y += Math.cos(time * 5) * 0.1;
+          targetL.y += Math.sin(time * 9) * 0.16;
+          targetR.y += Math.cos(time * 9.5) * 0.16;
         } else {
           // Interpolate punch extension
           const act = ACTIONS[p.state.action];
           const progress = 1.0 - p.state.timer / act.duration;
 
           // Smooth out and back curve
-          const extension = Math.sin(progress * Math.PI);
+          const extension = Math.pow(Math.sin(progress * Math.PI), 0.65);
 
           targetL.lerp(act.l, extension);
           targetR.lerp(act.r, extension);
         }
 
         // Smooth lerp visually
-        const lerpSpeed = 0.3;
+        const lerpSpeed = 0.6;
         p.leftGlove.position.lerp(targetL, lerpSpeed);
         p.rightGlove.position.lerp(targetR, lerpSpeed);
       }
@@ -831,30 +931,28 @@
         const deltaTime = time - previousTime; // Safe delta calc
         previousTime = time;
 
-        updateCameras();
-
-        // Process Gloves and Hit Detection
         processActions(player1, player2, time, deltaTime);
         processActions(player2, player1, time, deltaTime);
+        updateCameras();
 
         // Render Split Screen
         const w = window.innerWidth;
         const h = window.innerHeight;
         const halfW = Math.floor(w / 2);
 
-        // ---- RENDER LEFT HALF (Player 1 View) ----
+        // p1 view
         renderer.setViewport(0, 0, halfW, h);
         renderer.setScissor(0, 0, halfW, h);
         renderer.setClearColor(0x87ceeb);
         renderer.clear();
 
-        // Set View States for Camera 1
+        // cam 1
         setPlayerViewMode(player1, true); // P1 is front
         setPlayerViewMode(player2, false); // P2 is enemy
 
         renderer.render(scene, camera1);
 
-        // ---- RENDER RIGHT HALF (Player 2 View) ----
+        // p2 view
         renderer.setViewport(halfW, 0, halfW, h);
         renderer.setScissor(halfW, 0, halfW, h);
         renderer.setClearColor(0x87ceeb);
@@ -870,7 +968,7 @@
       // Start rendering
       animate();
 
-      // Start the bodycam effect AFTER renderer and canvas exist
+      // Start the bodycam effect after renderer and canvas exist
       BodycamEffect.start();
     </script>
   </body>
