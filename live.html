@@ -1,0 +1,417 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>Live Sensor Readout</title>
+<style>
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; -webkit-user-select: none; user-select: none; touch-action: manipulation; }
+  html, body { margin: 0; padding: 0; background: #000; color: #f5f5f5; font-family: -apple-system, system-ui, "Segoe UI", Roboto, sans-serif; min-height: 100vh; }
+
+  #startBtn {
+    position: fixed; inset: 0; width: 100%; height: 100%;
+    background: #111; color: #fff; font-size: 32px; font-weight: 800;
+    letter-spacing: 4px; border: none; z-index: 10;
+  }
+  #startBtn:active { background: #222; }
+  #startBtn .sub { display: block; font-size: 13px; font-weight: 400; opacity: 0.6; margin-top: 12px; letter-spacing: normal; }
+
+  #app { display: none; padding: 12px; padding-top: calc(12px + env(safe-area-inset-top)); padding-bottom: calc(12px + env(safe-area-inset-bottom)); }
+  #app.active { display: block; }
+
+  .card {
+    background: #121212; border: 1px solid #1f1f1f; border-radius: 12px;
+    padding: 12px 14px; margin-bottom: 10px;
+  }
+  .card h2 {
+    margin: 0 0 8px 0; font-size: 12px; letter-spacing: 2px; color: #9aa;
+    font-weight: 600; text-transform: uppercase;
+  }
+  .row {
+    display: grid; grid-template-columns: 38px 1fr 70px;
+    align-items: center; gap: 8px; padding: 4px 0;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 16px;
+  }
+  .row .lbl { color: #888; font-size: 13px; }
+  .row .bar {
+    height: 8px; background: #222; border-radius: 4px; position: relative; overflow: hidden;
+  }
+  .row .bar .fill {
+    position: absolute; top: 0; bottom: 0; left: 50%;
+    background: #4ade80; transition: width 60ms linear, transform 60ms linear;
+    transform-origin: left center;
+  }
+  .row .v {
+    text-align: right; font-variant-numeric: tabular-nums; font-weight: 700;
+  }
+  .row .v.neg { color: #f87171; }
+  .row .v.pos { color: #4ade80; }
+  .row .v.zero { color: #888; }
+  .mag {
+    font-family: ui-monospace, monospace; font-size: 12px;
+    color: #aaa; margin-top: 4px; text-align: right;
+  }
+
+  #status {
+    font-size: 11px; color: #6c8; text-align: center; margin-bottom: 8px;
+    font-family: ui-monospace, monospace;
+  }
+  .err { color: #f87171; }
+
+  /* Detected-move panel */
+  #detected {
+    border-radius: 14px; padding: 18px 14px; margin-bottom: 12px;
+    text-align: center; transition: background-color 120ms ease;
+    background: #1f2937;
+  }
+  #detected .name {
+    font-size: 36px; font-weight: 900; letter-spacing: 4px; color: #fff;
+    line-height: 1;
+  }
+  #detected .why {
+    font-family: ui-monospace, monospace; font-size: 11px;
+    color: rgba(255,255,255,0.85); margin-top: 8px;
+  }
+  #detected.move-JAB         { background: #d97706; }
+  #detected.move-HOOK        { background: #7c3aed; }
+  #detected.move-UPPERCUT    { background: #dc2626; }
+  #detected.move-DODGE_LEFT  { background: #06b6d4; }
+  #detected.move-DODGE_RIGHT { background: #06b6d4; }
+  #detected.move-DODGE_BACK  { background: #0e7490; }
+  #detected.move-BLOCK        { background: #16a34a; }
+  #detected.move-IDLE        { background: #1f2937; }
+</style>
+</head>
+<body>
+
+<button id="startBtn" type="button">
+  TAP TO START
+  <span class="sub">grants motion sensor permission</span>
+</button>
+
+<main id="app">
+  <div id="status">connecting…</div>
+
+  <div id="detected" class="move-IDLE">
+    <div class="name" id="detName">IDLE</div>
+    <div class="why" id="detWhy">gate: peak |a| &gt; 15 · dominant axis + orientation/gyro pick the move</div>
+  </div>
+
+  <div class="card">
+    <h2>Acceleration (incl. gravity, m/s²)</h2>
+    <div class="row" data-key="ag-x"><span class="lbl">X</span><div class="bar"><div class="fill"></div></div><span class="v">—</span></div>
+    <div class="row" data-key="ag-y"><span class="lbl">Y</span><div class="bar"><div class="fill"></div></div><span class="v">—</span></div>
+    <div class="row" data-key="ag-z"><span class="lbl">Z</span><div class="bar"><div class="fill"></div></div><span class="v">—</span></div>
+    <div class="mag" id="ag-mag">|a| = —</div>
+  </div>
+
+  <div class="card">
+    <h2>Acceleration (no gravity, m/s²)</h2>
+    <div class="row" data-key="a-x"><span class="lbl">X</span><div class="bar"><div class="fill"></div></div><span class="v">—</span></div>
+    <div class="row" data-key="a-y"><span class="lbl">Y</span><div class="bar"><div class="fill"></div></div><span class="v">—</span></div>
+    <div class="row" data-key="a-z"><span class="lbl">Z</span><div class="bar"><div class="fill"></div></div><span class="v">—</span></div>
+    <div class="mag" id="a-mag">|a| = —</div>
+  </div>
+
+  <div class="card">
+    <h2>Rotation rate (°/s)</h2>
+    <div class="row" data-key="r-a"><span class="lbl">α</span><div class="bar"><div class="fill"></div></div><span class="v">—</span></div>
+    <div class="row" data-key="r-b"><span class="lbl">β</span><div class="bar"><div class="fill"></div></div><span class="v">—</span></div>
+    <div class="row" data-key="r-g"><span class="lbl">γ</span><div class="bar"><div class="fill"></div></div><span class="v">—</span></div>
+    <div class="mag" id="r-mag">|ω| = —</div>
+  </div>
+
+  <div class="card">
+    <h2>Orientation (°)</h2>
+    <div class="row" data-key="o-a"><span class="lbl">α</span><div class="bar"><div class="fill"></div></div><span class="v">—</span></div>
+    <div class="row" data-key="o-b"><span class="lbl">β</span><div class="bar"><div class="fill"></div></div><span class="v">—</span></div>
+    <div class="row" data-key="o-g"><span class="lbl">γ</span><div class="bar"><div class="fill"></div></div><span class="v">—</span></div>
+  </div>
+</main>
+
+<script>
+'use strict';
+
+const startBtn = document.getElementById('startBtn');
+const app = document.getElementById('app');
+const statusEl = document.getElementById('status');
+
+const raw = {
+  ag: { x: null, y: null, z: null },   // accelerationIncludingGravity
+  a:  { x: null, y: null, z: null },   // acceleration (no gravity)
+  r:  { alpha: null, beta: null, gamma: null }, // rotationRate
+  o:  { alpha: null, beta: null, gamma: null }, // orientation angles
+};
+let motionEvents = 0;
+let orientationEvents = 0;
+let lastMotionAt = 0;
+let lastOrientationAt = 0;
+
+// Bar full-scale values (clip beyond these). Tuned for typical hand motion.
+const FS_ACCEL_AG = 25;   // m/s² incl. gravity
+const FS_ACCEL_A  = 25;   // m/s² no gravity
+const FS_GYRO     = 600;  // °/s
+const FS_ORIENT_A = 360;  // alpha 0..360
+const FS_ORIENT_B = 180;  // beta -180..180
+const FS_ORIENT_G = 90;   // gamma -90..90
+
+startBtn.addEventListener('click', async () => {
+  startBtn.disabled = true;
+  startBtn.textContent = 'requesting…';
+  try {
+    let m = true, o = true;
+    if (typeof DeviceMotionEvent !== 'undefined' && typeof DeviceMotionEvent.requestPermission === 'function') {
+      m = (await DeviceMotionEvent.requestPermission()) === 'granted';
+    }
+    if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
+      o = (await DeviceOrientationEvent.requestPermission()) === 'granted';
+    }
+    if (!m || !o) {
+      startBtn.style.display = 'none';
+      app.classList.add('active');
+      statusEl.classList.add('err');
+      statusEl.textContent = 'motion permission denied — open Settings → Safari → Motion & Orientation Access';
+      return;
+    }
+    try {
+      if ('wakeLock' in navigator) await navigator.wakeLock.request('screen');
+    } catch {}
+
+    window.addEventListener('devicemotion', onMotion, true);
+    window.addEventListener('deviceorientation', onOrientation, true);
+
+    startBtn.style.display = 'none';
+    app.classList.add('active');
+    requestAnimationFrame(render);
+  } catch (err) {
+    statusEl.classList.add('err');
+    statusEl.textContent = 'error: ' + (err && err.message);
+    startBtn.disabled = false;
+    startBtn.textContent = 'TAP TO RETRY';
+  }
+});
+
+function onMotion(e) {
+  motionEvents++;
+  lastMotionAt = performance.now();
+  const ag = e.accelerationIncludingGravity;
+  if (ag) { raw.ag.x = ag.x; raw.ag.y = ag.y; raw.ag.z = ag.z; }
+  const a = e.acceleration;
+  if (a) { raw.a.x = a.x; raw.a.y = a.y; raw.a.z = a.z; }
+  const r = e.rotationRate;
+  if (r) { raw.r.alpha = r.alpha; raw.r.beta = r.beta; raw.r.gamma = r.gamma; }
+}
+function onOrientation(e) {
+  orientationEvents++;
+  lastOrientationAt = performance.now();
+  raw.o.alpha = e.alpha; raw.o.beta = e.beta; raw.o.gamma = e.gamma;
+}
+
+// Cache row references so we don't requery per frame.
+const ROW_CACHE = {};
+for (const row of document.querySelectorAll('[data-key]')) {
+  const k = row.dataset.key;
+  ROW_CACHE[k] = { v: row.querySelector('.v'), fill: row.querySelector('.bar .fill') };
+}
+
+function setRow(key, value, full) {
+  const r = ROW_CACHE[key]; if (!r) return;
+  if (value == null || !isFinite(value)) {
+    r.v.textContent = '—';
+    r.v.className = 'v zero';
+    r.fill.style.width = '0%';
+    r.fill.style.transform = 'translateX(0)';
+    return;
+  }
+  r.v.textContent = (value >= 0 ? '+' : '') + value.toFixed(2);
+  r.v.className = 'v ' + (Math.abs(value) < 0.05 ? 'zero' : (value < 0 ? 'neg' : 'pos'));
+  // Bar: half-width fill anchored at center, scale by |value|/full, slide left if negative.
+  const f = Math.max(-1, Math.min(1, value / full));
+  const w = Math.abs(f) * 50;
+  r.fill.style.width = w + '%';
+  if (f >= 0) {
+    r.fill.style.left = '50%';
+    r.fill.style.transform = 'translateX(0)';
+    r.fill.style.background = '#4ade80';
+  } else {
+    r.fill.style.left = '50%';
+    r.fill.style.transform = 'translateX(-100%)';
+    r.fill.style.background = '#f87171';
+  }
+}
+
+function setMag(id, x, y, z) {
+  const el = document.getElementById(id);
+  if (x == null || y == null || z == null) { el.textContent = ''; return; }
+  const m = Math.sqrt(x*x + y*y + z*z);
+  el.textContent = (id.startsWith('r') ? '|ω| = ' : '|a| = ') + m.toFixed(2);
+}
+
+// Classifier rules per user spec:
+//   Trigger when max(|aX|, |aY|, |aZ|) > CLASSIFIER_THRESHOLD.
+//   Then dispatch on the dominant axis:
+//
+//   Z dominant:
+//     β ∈ [60, 120] (90 ± 30, phone vertical) → side dodge
+//                                                aZ ≥ 0 → DODGE_LEFT
+//                                                aZ < 0 → DODGE_RIGHT
+//     otherwise (β closer to 0, phone tilted) → UPPERCUT
+//
+//   X dominant:
+//     aX > 0 → JAB
+//     aX < 0:
+//       large negative γ̇ (gamma rotation rate) → DODGE_BACK
+//       otherwise                              → unclassified (null)
+//
+//   Y dominant:
+//     HOOK
+//
+// All accelerations are `acceleration` (no gravity, device frame).
+const CLASSIFIER_THRESHOLD = 15;
+const BETA_DODGE_LO = 50;       // 90 ± 30
+const BETA_DODGE_HI = 130;
+const GAMMA_RATE_BACKDODGE = -100;   // °/s;
+const BETA_X_LO = 60;           // JAB / DODGE_BACK only when β ∈ [60, 120]
+const BETA_X_HI = 120;
+const BETA_RATE_BLOCK = 200;     // °/s; large positive β rotation rate → BLOCK
+
+function classify() {
+  // BLOCK: large positive β rotation rate (independent of acceleration).
+  
+  const betaRate = raw.r.beta;
+  if (typeof betaRate === 'number' && betaRate > BETA_RATE_BLOCK) {
+    return { move: 'BLOCK', axis: 'β̇', value: betaRate };
+  }
+  const x = raw.a.x, y = raw.a.y, z = raw.a.z;
+  if (typeof x !== 'number' || typeof y !== 'number' || typeof z !== 'number') return null;
+  const ax = Math.abs(x), ay = Math.abs(y), az = Math.abs(z);
+  const peak = Math.max(ax, ay, az);
+  if (peak <= CLASSIFIER_THRESHOLD) return null;
+
+  // Z dominant
+  if (peak === az) {
+    const beta = raw.o.beta;
+    if (typeof beta === 'number' && beta >= BETA_DODGE_LO && beta <= BETA_DODGE_HI) {
+      const move = z <= 0 ? 'DODGE_LEFT' : 'DODGE_RIGHT';
+      return { move, axis: 'aZ', value: z, extra: 'β=' + beta.toFixed(0) + '°' };
+    }
+    return { move: 'UPPERCUT', axis: 'aZ', value: z, extra: (typeof beta === 'number' ? 'β=' + beta.toFixed(0) + '°' : '') };
+  }
+
+  // X dominant — JAB and DODGE_BACK both gated to β within 30° of 90.
+  if (peak === ax) {
+    const beta = raw.o.beta;
+    if (typeof beta !== 'number' || beta < BETA_X_LO || beta > BETA_X_HI) return null;
+    const gammaRate = raw.r.gamma;
+    if (typeof gammaRate === 'number') {
+      if (x > 0) return { move: 'JAB', axis: 'aX', value: x, extra: 'β=' + beta.toFixed(0) + '°' };
+      return { move: 'DODGE_BACK', axis: 'aX', value: x, extra: 'β=' + beta.toFixed(0) + '°  γ̇=' + gammaRate.toFixed(0) + '°/s' };
+    }
+    return null;   // aX < 0 without large negative γ̇ — unclassified
+  }
+  return { move: 'HOOK', axis: 'aY', value: y };
+}
+
+const detEl = document.getElementById('detected');
+const detName = document.getElementById('detName');
+const detWhy  = document.getElementById('detWhy');
+let displayedMove = 'IDLE';
+let lastMoveSeenAt = 0;
+const MOVE_LATCH_MS = 250;
+
+// Re-arm gate: after a move fires, suppress further moves until the phone has
+// been below the activity threshold continuously for IDLE_REARM_MS.
+const IDLE_REARM_MS = 120;
+let armed = true;
+let quietSince = 0;            // performance.now() when peak |a| dropped below threshold; 0 = currently active
+
+function peakAccelMagnitude() {
+  const x = raw.a.x, y = raw.a.y, z = raw.a.z;
+  let p = 0;
+  if (typeof x === 'number') p = Math.max(p, Math.abs(x));
+  if (typeof y === 'number') p = Math.max(p, Math.abs(y));
+  if (typeof z === 'number') p = Math.max(p, Math.abs(z));
+  return p;
+}
+
+function updateDetected() {
+  const now = performance.now();
+
+  // Track quiet windows independently of classification so re-arm logic
+  // works even when classify() returns null mid-motion (the "X- with no
+  // large γ̇" unclassified branch).
+  const peak = peakAccelMagnitude();
+  if (peak > CLASSIFIER_THRESHOLD) {
+    quietSince = 0;
+  } else {
+    if (!quietSince) quietSince = now;
+    if (!armed && now - quietSince >= IDLE_REARM_MS) armed = true;
+  }
+
+  // Only consult classify() when armed. While locked out, hits are dropped.
+  const hit = armed ? classify() : null;
+  let target;
+  if (hit) {
+    target = hit.move;
+    lastMoveSeenAt = now;
+    armed = false;            // lock until the next quiet window
+    quietSince = 0;
+    detWhy.textContent = hit.axis + ' = ' + (hit.value >= 0 ? '+' : '') + hit.value.toFixed(2) +
+      (hit.extra ? '  ·  ' + hit.extra : '') +
+      '  ·  peak |a| > ' + CLASSIFIER_THRESHOLD;
+  } else if (now - lastMoveSeenAt < MOVE_LATCH_MS) {
+    // Hold the previous move on screen briefly so a single-frame spike is visible.
+    target = displayedMove;
+  } else {
+    target = 'IDLE';
+    detWhy.textContent = 'gate: peak |a| > ' + CLASSIFIER_THRESHOLD + ' · must return to idle (' + IDLE_REARM_MS + 'ms) before next move';
+  }
+  if (target !== displayedMove) {
+    detEl.classList.remove('move-' + displayedMove);
+    detEl.classList.add('move-' + target);
+    detName.textContent = target;
+    displayedMove = target;
+  }
+}
+
+let frame = 0;
+function render() {
+  // Status header
+  if (frame % 6 === 0) {
+    const now = performance.now();
+    const motionStale = lastMotionAt && (now - lastMotionAt > 1000);
+    const orientStale = lastOrientationAt && (now - lastOrientationAt > 1000);
+    statusEl.textContent =
+      'motion: ' + motionEvents + ' events' + (motionStale ? ' (stale)' : '') +
+      ' · orientation: ' + orientationEvents + ' events' + (orientStale ? ' (stale)' : '');
+  }
+  frame++;
+
+  updateDetected();
+
+  setRow('ag-x', raw.ag.x, FS_ACCEL_AG);
+  setRow('ag-y', raw.ag.y, FS_ACCEL_AG);
+  setRow('ag-z', raw.ag.z, FS_ACCEL_AG);
+  setMag('ag-mag', raw.ag.x, raw.ag.y, raw.ag.z);
+
+  setRow('a-x', raw.a.x, FS_ACCEL_A);
+  setRow('a-y', raw.a.y, FS_ACCEL_A);
+  setRow('a-z', raw.a.z, FS_ACCEL_A);
+  setMag('a-mag', raw.a.x, raw.a.y, raw.a.z);
+
+  setRow('r-a', raw.r.alpha, FS_GYRO);
+  setRow('r-b', raw.r.beta,  FS_GYRO);
+  setRow('r-g', raw.r.gamma, FS_GYRO);
+  setMag('r-mag', raw.r.alpha, raw.r.beta, raw.r.gamma);
+
+  setRow('o-a', raw.o.alpha, FS_ORIENT_A);
+  setRow('o-b', raw.o.beta,  FS_ORIENT_B);
+  setRow('o-g', raw.o.gamma, FS_ORIENT_G);
+
+  requestAnimationFrame(render);
+}
+</script>
+</body>
+</html>

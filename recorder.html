@@ -1,0 +1,626 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<title>Move Recorder</title>
+<style>
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; -webkit-user-select: none; user-select: none; touch-action: manipulation; }
+  html, body { margin: 0; padding: 0; background: #0a0a0a; color: #f3f3f3; font-family: -apple-system, system-ui, "Segoe UI", Roboto, sans-serif; min-height: 100vh; min-height: 100dvh; overflow-x: hidden; }
+  button { font-family: inherit; }
+
+  .screen {
+    position: fixed; inset: 0; display: none; flex-direction: column;
+    padding: 16px;
+    padding-bottom: calc(16px + env(safe-area-inset-bottom));
+    padding-top:    calc(16px + env(safe-area-inset-top));
+  }
+  .screen.active { display: flex; }
+
+  h1 { font-size: 22px; margin: 0 0 8px 0; letter-spacing: 1px; }
+  .sub { font-size: 13px; color: #a8a8a8; line-height: 1.5; }
+  .center { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; gap: 12px; }
+
+  .primary, .secondary, .danger, .ghost {
+    width: 100%; min-height: 64px; border: none; border-radius: 14px;
+    font-size: 20px; font-weight: 800; letter-spacing: 1.5px;
+    color: #fff; margin-top: 8px; padding: 8px;
+  }
+  .primary  { background: #16a34a; }
+  .secondary { background: #374151; }
+  .danger   { background: #dc2626; }
+  .ghost    { background: transparent; color: #ccc; border: 1px solid #333; font-weight: 600; }
+  .primary:active, .secondary:active, .danger:active, .ghost:active { transform: scale(0.98); }
+
+  /* SPLASH */
+  #splash .center { gap: 14px; }
+  #splash p { color: #a0a0a0; font-size: 14px; line-height: 1.5; max-width: 360px; }
+
+  /* CALIBRATE */
+  #calibrate .pose {
+    background: #131313; border: 1px solid #222; border-radius: 12px; padding: 16px;
+    font-size: 14px; line-height: 1.7; color: #ddd; max-width: 420px;
+    text-align: left;
+  }
+  #calibrate .pose b { color: #fff; }
+  #calibrate .live {
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px;
+    color: #888; margin-top: 8px; line-height: 1.5;
+  }
+
+  /* MAIN */
+  #main .header { display: flex; justify-content: space-between; align-items: baseline; }
+  #main .recal { font-size: 12px; color: #6c8; cursor: pointer; }
+  #main .grid {
+    display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; margin-top: 12px;
+  }
+  #main .grid button {
+    min-height: 78px; border: none; border-radius: 12px;
+    font-size: 14px; font-weight: 800; letter-spacing: 1px;
+    color: #fff; padding: 8px 6px; line-height: 1.2;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    gap: 4px;
+  }
+  #main .grid .count { font-size: 11px; opacity: 0.7; font-weight: 500; letter-spacing: 0; }
+  #main .grid .b-jab        { background: #d97706; }
+  #main .grid .b-hook       { background: #7c3aed; }
+  #main .grid .b-uppercut   { background: #dc2626; }
+  #main .grid .b-block      { background: #2563eb; }
+  #main .grid .b-heal       { background: #16a34a; }
+  #main .grid .b-noise      { background: #4b5563; }
+  #main .grid .b-dodgeleft  { background: #06b6d4; }
+  #main .grid .b-dodgeback  { background: #0e7490; }
+  #main .grid .b-dodgeright { background: #06b6d4; }
+  #main .toast {
+    background: #14532d; color: #d1fae5; padding: 10px 12px; border-radius: 10px;
+    font-size: 12px; margin-top: 12px; line-height: 1.5;
+  }
+  #main .toast.hidden { display: none; }
+  #main .footer {
+    margin-top: auto; padding-top: 12px; font-size: 11px; color: #777;
+    display: flex; justify-content: space-between; align-items: center;
+  }
+  #main .footer a { color: #888; text-decoration: underline; cursor: pointer; }
+
+  /* PRE-RECORD */
+  #preRecord .label {
+    font-size: 48px; font-weight: 900; letter-spacing: 4px; line-height: 1;
+    margin: 12px 0; padding: 24px 12px; border-radius: 16px;
+    background: #1a1a1a; word-break: break-word;
+  }
+  #preRecord .filename {
+    font-family: ui-monospace, monospace; font-size: 13px; color: #aaa;
+  }
+
+  /* RECORDING */
+  #recording { background: #1a0606; }
+  #recording .rec-row { display: flex; align-items: center; gap: 10px; }
+  #recording .dot {
+    display: inline-block; width: 16px; height: 16px; border-radius: 50%;
+    background: #ef4444; animation: pulse 1s infinite;
+  }
+  @keyframes pulse {
+    0%, 100% { opacity: 1; transform: scale(1); }
+    50% { opacity: 0.4; transform: scale(0.85); }
+  }
+  #recording .rec-label { font-size: 18px; font-weight: 700; letter-spacing: 2px; color: #fecaca; }
+  #recording .move-name {
+    font-size: 36px; font-weight: 900; letter-spacing: 3px; color: #fff;
+    margin-top: 8px;
+  }
+  #recording .elapsed {
+    font-size: 56px; font-weight: 900; font-variant-numeric: tabular-nums;
+    margin: 8px 0; color: #fff;
+  }
+  #recording .live {
+    font-family: ui-monospace, monospace; font-size: 11px;
+    color: #fbbcbc; opacity: 0.85; line-height: 1.6;
+    background: rgba(0,0,0,0.4); border-radius: 8px;
+    padding: 10px 12px; margin-top: 10px;
+    display: grid; grid-template-columns: 1fr 1fr; gap: 0 14px;
+  }
+
+  /* ERROR / TOAST */
+  #errBox {
+    position: fixed; left: 12px; right: 12px; top: 12px; z-index: 2000;
+    background: #4a1313; color: #fdd; padding: 14px; border-radius: 10px;
+    font-size: 14px; display: none; line-height: 1.4;
+  }
+  #errBox.active { display: block; }
+</style>
+</head>
+<body>
+
+<div id="errBox"></div>
+
+<!-- SPLASH -->
+<section id="splash" class="screen active">
+  <div class="center">
+    <h1>MOVE RECORDER</h1>
+    <p>Records labeled raw sensor samples (~60 Hz) and exports each take as a CSV. Sensor data is transformed to the player-relative world frame defined in MOVES.md.</p>
+    <button class="primary" id="startBtn">TAP TO START</button>
+  </div>
+</section>
+
+<!-- CALIBRATE -->
+<section id="calibrate" class="screen">
+  <h1>CALIBRATE GUARD POSE</h1>
+  <div class="center">
+    <div class="pose">
+      Stand in your normal stance. Hold the phone in your <b>right hand</b>, vertical (long axis up), with the <b>screen facing your left</b> (toward your body). Top edge points up; charging port points down.
+      <br><br>
+      Hold steady, then tap <b>CALIBRATE</b>. The orientation captured here defines the world frame: <b>+X forward (toward opponent), +Y up, +Z to your right.</b>
+      <br><br>
+      You can recalibrate any time later.
+    </div>
+    <div class="live" id="calibLive">orientation: waiting for sensor…</div>
+  </div>
+  <button class="primary" id="calibrateBtn" disabled>CALIBRATE</button>
+</section>
+
+<!-- MAIN (label grid) -->
+<section id="main" class="screen">
+  <div class="header">
+    <h1>RECORD</h1>
+    <span class="recal" id="recalBtn">↻ recalibrate</span>
+  </div>
+  <div class="sub">Tap a move, then START.</div>
+  <div class="grid" id="grid"></div>
+  <div class="toast hidden" id="toast"></div>
+  <div class="footer">
+    <span id="footerInfo">total: 0 files</span>
+    <a id="resetCountersLink">reset counters</a>
+  </div>
+</section>
+
+<!-- PRE-RECORD -->
+<section id="preRecord" class="screen">
+  <h1>READY</h1>
+  <div class="center">
+    <div class="label" id="preLabel">JAB</div>
+    <div class="filename">next file: <span id="preFilename">jab_001.csv</span></div>
+    <div class="sub">Get into position. Tap START, perform the move, tap STOP.</div>
+  </div>
+  <button class="primary" id="recordStartBtn">START</button>
+  <button class="ghost" id="preCancelBtn">CANCEL</button>
+</section>
+
+<!-- RECORDING -->
+<section id="recording" class="screen">
+  <div class="rec-row">
+    <span class="dot"></span><span class="rec-label">RECORDING</span>
+  </div>
+  <div class="center">
+    <div class="move-name" id="recMoveName">JAB</div>
+    <div class="elapsed" id="elapsed">00:00.000</div>
+    <div class="live" id="recLive"></div>
+  </div>
+  <button class="danger" id="recordStopBtn">STOP &amp; SAVE</button>
+</section>
+
+<script>
+'use strict';
+
+// ============================================================
+// LABELS
+// ============================================================
+const LABELS = [
+  { id: 'jab',         display: 'JAB',         cls: 'b-jab'        },
+  { id: 'hook',        display: 'HOOK',        cls: 'b-hook'       },
+  { id: 'uppercut',    display: 'UPPERCUT',    cls: 'b-uppercut'   },
+  { id: 'block',       display: 'BLOCK',       cls: 'b-block'      },
+  { id: 'heal',        display: 'HEAL',        cls: 'b-heal'       },
+  { id: 'noise',       display: 'NOISE / GUARD', cls: 'b-noise'    },
+  { id: 'dodge_left',  display: 'DODGE LEFT',  cls: 'b-dodgeleft'  },
+  { id: 'dodge_back',  display: 'DODGE BACK',  cls: 'b-dodgeback'  },
+  { id: 'dodge_right', display: 'DODGE RIGHT', cls: 'b-dodgeright' },
+];
+const COUNTERS_KEY = 'recorder-counters-v1';
+
+// ============================================================
+// MATRIX HELPERS  (3x3 row-major flat array)
+// ============================================================
+const I3 = [1,0,0, 0,1,0, 0,0,1];
+
+function matMul(A, B) {
+  return [
+    A[0]*B[0]+A[1]*B[3]+A[2]*B[6], A[0]*B[1]+A[1]*B[4]+A[2]*B[7], A[0]*B[2]+A[1]*B[5]+A[2]*B[8],
+    A[3]*B[0]+A[4]*B[3]+A[5]*B[6], A[3]*B[1]+A[4]*B[4]+A[5]*B[7], A[3]*B[2]+A[4]*B[5]+A[5]*B[8],
+    A[6]*B[0]+A[7]*B[3]+A[8]*B[6], A[6]*B[1]+A[7]*B[4]+A[8]*B[7], A[6]*B[2]+A[7]*B[5]+A[8]*B[8],
+  ];
+}
+function matVec(A, v) {
+  return [
+    A[0]*v[0] + A[1]*v[1] + A[2]*v[2],
+    A[3]*v[0] + A[4]*v[1] + A[5]*v[2],
+    A[6]*v[0] + A[7]*v[1] + A[8]*v[2],
+  ];
+}
+function matT(A) {
+  return [A[0],A[3],A[6], A[1],A[4],A[7], A[2],A[5],A[8]];
+}
+
+// W3C DeviceOrientation: R = Rz(α) · Rx(β) · Ry(γ) maps Earth → device.
+// (α = compass yaw, β = pitch, γ = roll. All input in DEGREES.)
+function buildR(alphaDeg, betaDeg, gammaDeg) {
+  const a = alphaDeg * Math.PI / 180;
+  const b = betaDeg  * Math.PI / 180;
+  const g = gammaDeg * Math.PI / 180;
+  const ca = Math.cos(a), sa = Math.sin(a);
+  const cb = Math.cos(b), sb = Math.sin(b);
+  const cg = Math.cos(g), sg = Math.sin(g);
+  const Rz = [ca,-sa, 0,  sa, ca, 0,  0, 0, 1];
+  const Rx = [ 1, 0, 0,  0, cb,-sb,  0, sb, cb];
+  const Ry = [cg, 0, sg, 0,  1, 0, -sg, 0, cg];
+  return matMul(matMul(Rz, Rx), Ry);
+}
+
+// Player-world ← calibration-device axis swap, screen-facing-LEFT grip:
+//   device-X (right edge) at calibration = world −X (forward is opposite)
+//   device-Y (top edge)  at calibration = world +Y (up)
+//   device-Z (screen normal) at calibration = world −Z (player's left)
+// So world.x = -calibDevice.x ; world.y = +calibDevice.y ; world.z = -calibDevice.z.
+const S_axis_swap = [
+  -1, 0, 0,
+   0, 1, 0,
+   0, 0,-1,
+];
+
+// ============================================================
+// STATE
+// ============================================================
+const state = {
+  phase: 'splash',
+  hasOrientation: false,
+  hasMotion: false,
+
+  // Latest raw readings (device frame).
+  orientation: { alpha: 0, beta: 0, gamma: 0 },
+  motion: { ax: 0, ay: 0, az: 0, gx: 0, gy: 0, gz: 0 },
+
+  // Calibration: capture R_calib (Earth → device@calib) at calibration time.
+  // Pre-multiply with S_axis_swap to get M = S · R_calib.
+  // Per-frame world transform: v_world = M · R_t^T · v_device.
+  calibrated: false,
+  M: null,
+
+  // Recording session state.
+  recording: false,
+  recordingLabel: null,
+  recordStartedAt: 0,
+  frames: [],
+
+  // Counters for filename auto-increment, persisted to localStorage.
+  counters: {},
+};
+
+function loadCounters() {
+  try {
+    const raw = localStorage.getItem(COUNTERS_KEY);
+    if (raw) state.counters = JSON.parse(raw) || {};
+  } catch {}
+}
+function saveCounters() {
+  try { localStorage.setItem(COUNTERS_KEY, JSON.stringify(state.counters)); } catch {}
+}
+loadCounters();
+
+// ============================================================
+// SCREEN ROUTING
+// ============================================================
+const screens = {
+  splash:    document.getElementById('splash'),
+  calibrate: document.getElementById('calibrate'),
+  main:      document.getElementById('main'),
+  preRecord: document.getElementById('preRecord'),
+  recording: document.getElementById('recording'),
+};
+function showScreen(name) {
+  state.phase = name;
+  for (const k of Object.keys(screens)) screens[k].classList.toggle('active', k === name);
+}
+
+const errBox = document.getElementById('errBox');
+function showError(msg) {
+  errBox.textContent = msg;
+  errBox.classList.add('active');
+  setTimeout(() => errBox.classList.remove('active'), 6000);
+}
+
+// ============================================================
+// PERMISSION + WAKE LOCK + SENSOR BIND
+// ============================================================
+let wakeLock = null;
+const startBtn = document.getElementById('startBtn');
+startBtn.addEventListener('click', async () => {
+  startBtn.disabled = true;
+  startBtn.textContent = 'requesting…';
+  try {
+    let m = true, o = true;
+    if (typeof DeviceMotionEvent !== 'undefined' && typeof DeviceMotionEvent.requestPermission === 'function') {
+      m = (await DeviceMotionEvent.requestPermission()) === 'granted';
+    }
+    if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
+      o = (await DeviceOrientationEvent.requestPermission()) === 'granted';
+    }
+    if (!m || !o) {
+      showError('Motion permission denied. Open Settings → Safari → Motion & Orientation Access.');
+      startBtn.disabled = false;
+      startBtn.textContent = 'TAP TO RETRY';
+      return;
+    }
+    try {
+      if ('wakeLock' in navigator) {
+        wakeLock = await navigator.wakeLock.request('screen');
+        document.addEventListener('visibilitychange', async () => {
+          if (document.visibilityState === 'visible' && !wakeLock) {
+            try { wakeLock = await navigator.wakeLock.request('screen'); } catch {}
+          }
+        });
+      }
+    } catch {}
+
+    bindSensors();
+    showScreen('calibrate');
+  } catch (err) {
+    showError('Permission error: ' + (err && err.message));
+    startBtn.disabled = false;
+    startBtn.textContent = 'TAP TO RETRY';
+  }
+});
+
+function bindSensors() {
+  // Sensor-reading layer ONLY. No filtering, no smoothing. Raw values stored
+  // and (for the recording path) transformed to world frame on the fly.
+  window.addEventListener('devicemotion', onMotion, true);
+  window.addEventListener('deviceorientation', onOrientation, true);
+}
+
+function onOrientation(e) {
+  if (typeof e.alpha !== 'number') return;
+  state.orientation.alpha = e.alpha;
+  state.orientation.beta  = e.beta;
+  state.orientation.gamma = e.gamma;
+  state.hasOrientation = true;
+  if (state.phase === 'calibrate') refreshCalibrateLive();
+}
+
+function onMotion(e) {
+  const a = e.accelerationIncludingGravity || e.acceleration || {};
+  const r = e.rotationRate || {};
+  state.motion.ax = num(a.x); state.motion.ay = num(a.y); state.motion.az = num(a.z);
+  // DeviceMotion rotationRate is in degrees per second (per W3C spec on iOS).
+  state.motion.gx = num(r.beta);    // about device-X
+  state.motion.gy = num(r.gamma);   // about device-Y
+  state.motion.gz = num(r.alpha);   // about device-Z
+  state.hasMotion = true;
+
+  if (state.recording) captureFrame();
+}
+function num(x) { return (typeof x === 'number' && isFinite(x)) ? x : 0; }
+
+// ============================================================
+// CALIBRATION
+// ============================================================
+const calibrateBtn = document.getElementById('calibrateBtn');
+const calibLive = document.getElementById('calibLive');
+
+function refreshCalibrateLive() {
+  if (state.hasOrientation) {
+    calibrateBtn.disabled = false;
+    const o = state.orientation;
+    calibLive.textContent =
+      'orientation now: α=' + o.alpha.toFixed(1) +
+      '°  β=' + o.beta.toFixed(1) +
+      '°  γ=' + o.gamma.toFixed(1) + '°';
+  }
+}
+
+calibrateBtn.addEventListener('click', () => {
+  if (!state.hasOrientation) {
+    showError('No orientation data yet. Move the phone slightly to wake the sensor.');
+    return;
+  }
+  const o = state.orientation;
+  const R_calib = buildR(o.alpha, o.beta, o.gamma);
+  // Per-frame transform: v_world = S · R_calib · R_t^T · v_device.
+  // Pre-compute M = S · R_calib once.
+  state.M = matMul(S_axis_swap, R_calib);
+  state.calibrated = true;
+  buildLabelGrid();
+  showScreen('main');
+});
+
+document.getElementById('recalBtn').addEventListener('click', () => {
+  if (state.recording) return;
+  showScreen('calibrate');
+  refreshCalibrateLive();
+});
+
+// ============================================================
+// WORLD-FRAME TRANSFORM (per recorded frame)
+// ============================================================
+function deviceToWorld(v) {
+  const o = state.orientation;
+  const R_t = buildR(o.alpha, o.beta, o.gamma);
+  // M_t = M · R_t^T;  v_world = M_t · v_device
+  const Mt = matMul(state.M, matT(R_t));
+  return matVec(Mt, v);
+}
+
+// ============================================================
+// MAIN SCREEN — label grid
+// ============================================================
+const gridEl = document.getElementById('grid');
+const toastEl = document.getElementById('toast');
+const footerInfoEl = document.getElementById('footerInfo');
+
+function buildLabelGrid() {
+  if (gridEl.childNodes.length) {
+    refreshGridCounts();
+    return;
+  }
+  for (const lbl of LABELS) {
+    const b = document.createElement('button');
+    b.className = lbl.cls;
+    b.dataset.id = lbl.id;
+    b.innerHTML = lbl.display + '<span class="count" id="cnt-' + lbl.id + '">—</span>';
+    b.addEventListener('click', () => onPickLabel(lbl));
+    gridEl.appendChild(b);
+  }
+  refreshGridCounts();
+}
+function refreshGridCounts() {
+  let total = 0;
+  for (const lbl of LABELS) {
+    const n = state.counters[lbl.id] || 0;
+    total += n;
+    const el = document.getElementById('cnt-' + lbl.id);
+    if (el) el.textContent = n + ' file' + (n === 1 ? '' : 's');
+  }
+  footerInfoEl.textContent = 'total: ' + total + ' files';
+}
+
+document.getElementById('resetCountersLink').addEventListener('click', () => {
+  if (!confirm('Reset all per-label file counters? Existing CSVs already on the phone are not affected.')) return;
+  state.counters = {};
+  saveCounters();
+  refreshGridCounts();
+});
+
+// ============================================================
+// PRE-RECORD + RECORDING FLOW
+// ============================================================
+const preLabelEl = document.getElementById('preLabel');
+const preFilenameEl = document.getElementById('preFilename');
+let pendingLabel = null;
+
+function nextFilename(labelId) {
+  const next = (state.counters[labelId] || 0) + 1;
+  return labelId + '_' + String(next).padStart(3, '0') + '.csv';
+}
+
+function onPickLabel(lbl) {
+  pendingLabel = lbl;
+  preLabelEl.textContent = lbl.display;
+  preFilenameEl.textContent = nextFilename(lbl.id);
+  showScreen('preRecord');
+}
+
+document.getElementById('preCancelBtn').addEventListener('click', () => {
+  pendingLabel = null;
+  showScreen('main');
+});
+
+document.getElementById('recordStartBtn').addEventListener('click', () => {
+  if (!pendingLabel) { showScreen('main'); return; }
+  startRecording(pendingLabel);
+});
+
+function startRecording(lbl) {
+  state.recordingLabel = lbl;
+  state.frames = [];
+  state.recordStartedAt = performance.now();
+  state.recording = true;
+  document.getElementById('recMoveName').textContent = lbl.display;
+  showScreen('recording');
+  rafElapsed();
+}
+
+function captureFrame() {
+  // Called from devicemotion handler. Build a world-frame frame from the
+  // current device-frame motion + most recent orientation.
+  const t = performance.now() - state.recordStartedAt;
+  const aDev = [state.motion.ax, state.motion.ay, state.motion.az];
+  const gDev = [state.motion.gx, state.motion.gy, state.motion.gz];
+  const aW = deviceToWorld(aDev);
+  const gW = deviceToWorld(gDev);
+  state.frames.push({ t, ax: aW[0], ay: aW[1], az: aW[2], gx: gW[0], gy: gW[1], gz: gW[2] });
+}
+
+const elapsedEl = document.getElementById('elapsed');
+const recLiveEl = document.getElementById('recLive');
+function rafElapsed() {
+  if (!state.recording) return;
+  const ms = performance.now() - state.recordStartedAt;
+  elapsedEl.textContent = fmtElapsed(ms);
+  const last = state.frames[state.frames.length - 1];
+  if (last) {
+    recLiveEl.innerHTML =
+      '<span>aX: ' + signed(last.ax) + '</span>' +
+      '<span>gX: ' + signed(last.gx) + '°/s</span>' +
+      '<span>aY: ' + signed(last.ay) + '</span>' +
+      '<span>gY: ' + signed(last.gy) + '°/s</span>' +
+      '<span>aZ: ' + signed(last.az) + '</span>' +
+      '<span>gZ: ' + signed(last.gz) + '°/s</span>' +
+      '<span>frames: ' + state.frames.length + '</span>' +
+      '<span>rate: ' + (ms > 0 ? (state.frames.length / (ms / 1000)).toFixed(0) : 0) + ' Hz</span>';
+  }
+  requestAnimationFrame(rafElapsed);
+}
+
+document.getElementById('recordStopBtn').addEventListener('click', () => {
+  if (!state.recording) return;
+  state.recording = false;
+  const lbl = state.recordingLabel;
+  const frames = state.frames;
+  const filename = nextFilename(lbl.id);
+  state.counters[lbl.id] = (state.counters[lbl.id] || 0) + 1;
+  saveCounters();
+  downloadCsv(filename, frames);
+  showToast('Saved ' + filename + ' — ' + frames.length + ' frames');
+  state.recordingLabel = null;
+  state.frames = [];
+  pendingLabel = null;
+  refreshGridCounts();
+  showScreen('main');
+});
+
+// ============================================================
+// CSV
+// ============================================================
+function downloadCsv(filename, frames) {
+  const header = 'timestamp_ms,accel_x,accel_y,accel_z,gyro_x,gyro_y,gyro_z\n';
+  const rows = new Array(frames.length);
+  for (let i = 0; i < frames.length; i++) {
+    const f = frames[i];
+    rows[i] =
+      f.t.toFixed(2) + ',' +
+      f.ax.toFixed(4) + ',' + f.ay.toFixed(4) + ',' + f.az.toFixed(4) + ',' +
+      f.gx.toFixed(4) + ',' + f.gy.toFixed(4) + ',' + f.gz.toFixed(4);
+  }
+  const csv = header + rows.join('\n') + '\n';
+  const blob = new Blob([csv], { type: 'text/csv' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 1500);
+}
+
+function showToast(msg) {
+  toastEl.textContent = msg;
+  toastEl.classList.remove('hidden');
+  setTimeout(() => toastEl.classList.add('hidden'), 4000);
+}
+
+// ============================================================
+// FORMATTERS
+// ============================================================
+function signed(v) {
+  if (v == null || !isFinite(v)) return '—';
+  return (v >= 0 ? '+' : '') + v.toFixed(2);
+}
+function fmtElapsed(ms) {
+  const m = Math.floor(ms / 60000);
+  const s = Math.floor((ms % 60000) / 1000);
+  const mss = Math.floor(ms) % 1000;
+  return String(m).padStart(2,'0') + ':' + String(s).padStart(2,'0') + '.' + String(mss).padStart(3,'0');
+}
+</script>
+</body>
+</html>
