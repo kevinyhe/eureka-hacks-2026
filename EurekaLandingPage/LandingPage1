@@ -1,0 +1,667 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Phone Boxing Arena</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Arial Black', Arial, sans-serif;
+            /* Replace your old background with these lines */
+            background-image: url('https://media1.tenor.com/m/HORu2GKol_cAAAAC/cheers.gif');
+            background-size: cover;
+            background-position: center -45px;
+            background-repeat: no-repeat;
+            background-attachment: fixed;
+
+            color: #fff;
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            position: relative;
+            /* Needed for the overlay */
+        }
+
+        /* Add this OVERLAY to make sure your text is still readable over the gif */
+        body::before {
+            content: "";
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.75);
+            /* Adjust 0.6 to make it darker or lighter */
+            z-index: -1;
+        }
+
+        /* Add this to your existing styles */
+        .logo-container {
+            display: flex;
+            align-items: center;
+            cursor: pointer;
+        }
+
+        .logo-image {
+            width: 100px;
+            /* Adjust size as needed */
+            height: 60px;
+            margin-right: 25px;
+            /*border-radius: 50%;   Optional: makes it circular */
+        }
+
+        .logo-image-text {
+            width: 500px;
+            /* Adjust size as needed */
+            height: 60px;
+            margin-right: 25px;
+            /*border-radius: 50%;   Optional: makes it circular */
+        }
+
+        .logo-text {
+            font-size: 28px;
+            font-weight: bold;
+            color: #ff3333;
+            text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.8);
+        }
+
+        /* body {
+            font-family: 'Arial Black', Arial, sans-serif;
+            background: linear-gradient(135deg, #1a1a1a 0%, #2d1b1b 100%);
+            color: #fff;
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+        } */
+
+        header {
+            background: rgba(139, 0, 0, 0.5);
+            /* Semi-transparent dark red */
+            backdrop-filter: blur(80px);
+            /* Blurs the background GIF behind the header */
+            padding: 20px 0;
+            box-shadow: 0 4px 20px rgba(255, 0, 0, 0.3);
+            position: sticky;
+            top: 0;
+            z-index: 100;
+        }
+
+        nav {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 0 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .logo {
+            font-size: 28px;
+            font-weight: bold;
+            color: #ff3333;
+            text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.8);
+            cursor: pointer;
+        }
+
+        .nav-links {
+            display: flex;
+            gap: 15px;
+            /* Slightly tighter gap for buttons */
+            list-style: none;
+        }
+
+        .nav-links a {
+            color: #fff;
+            text-decoration: none;
+            font-size: 14px;
+            font-family: 'Arial Black', sans-serif;
+            padding: 10px 20px;
+            border: 2px solid rgba(255, 255, 255, 0.2);
+            /* Subtle border */
+            border-radius: 8px;
+            transition: all 0.3s ease;
+            cursor: pointer;
+            text-transform: uppercase;
+            background: rgba(255, 255, 255, 0.05);
+            /* Very slight tint */
+        }
+
+        .nav-links a:hover {
+            color: #ff3333;
+            /* Changes text color to red */
+            border-color: #ff3333;
+            /* Changes border to red */
+            background: rgba(255, 51, 51, 0.1);
+            /* Subtle red glow inside */
+            transform: translateY(-2px);
+            /* Slight lift effect */
+        }
+
+        main {
+            flex: 1;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 40px 20px;
+        }
+
+        .page {
+            display: none;
+            max-width: 1200px;
+            width: 100%;
+        }
+
+        .page.active {
+            display: block;
+        }
+
+        .hero {
+            text-align: center;
+        }
+
+        h1 {
+            font-size: 72px;
+            margin-bottom: 20px;
+            color: #ff3333;
+            text-shadow: 4px 4px 10px rgba(0, 0, 0, 0.9), 0 0 20px rgba(255, 51, 51, 0.4);
+            letter-spacing: 2px;
+        }
+
+        h2 {
+            font-size: 48px;
+            margin-bottom: 30px;
+            color: #ff3333;
+            text-shadow: 3px 3px 8px rgba(0, 0, 0, 0.9), 0 0 15px rgba(255, 51, 51, 0.4);
+        }
+
+        .subtitle {
+            font-size: 24px;
+            margin-bottom: 40px;
+            color: #fff;
+            font-weight: bold;
+            text-shadow: 2px 2px 6px rgba(0, 0, 0, 0.9);
+        }
+
+        .cta-container {
+            display: flex;
+            gap: 20px;
+            justify-content: center;
+            margin-bottom: 50px;
+        }
+
+        .btn {
+            padding: 20px 50px;
+            font-size: 20px;
+            font-weight: bold;
+            border: none;
+            border-radius: 10px;
+            cursor: pointer;
+            transition: all 0.3s;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            box-shadow: 0 6px 20px rgba(0, 0, 0, 0.4);
+        }
+
+        .btn-primary {
+            background: linear-gradient(135deg, #ff3333 0%, #cc0000 100%);
+            color: white;
+        }
+
+        .btn-primary:hover {
+            transform: translateY;
+            transform: translateY(-3px);
+            box-shadow: 0 8px 25px rgba(255, 51, 51, 0.5);
+        }
+
+        .btn-secondary {
+            background: linear-gradient(135deg, #ff3333 0%, #cc0000 100%);
+            color: #fff;
+            border: 3px solid #ff3333;
+        }
+
+        .btn-secondary:hover {
+            background: #ff3333;
+            transform: translateY(-3px);
+            box-shadow: 0 8px 25px rgba(255, 51, 51, 0.5);
+        }
+
+        .room-code-section {
+            background: rgba(255, 255, 255, 0.1);
+            border: 2px solid #ff3333;
+            border-radius: 15px;
+            padding: 30px;
+            max-width: 500px;
+            margin: 0 auto;
+            backdrop-filter: blur(10px);
+        }
+
+        .room-code-section h2 {
+            font-size: 24px;
+            margin-bottom: 20px;
+            color: #ff3333;
+        }
+
+        .input-group {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 20px;
+        }
+
+        input[type="text"] {
+            flex: 1;
+            padding: 15px;
+            font-size: 18px;
+            border: 2px solid #444;
+            border-radius: 8px;
+            background: rgba(0, 0, 0, 0.5);
+            color: #fff;
+            text-align: center;
+            letter-spacing: 3px;
+            text-transform: uppercase;
+        }
+
+        input[type="text"]:focus {
+            outline: none;
+            border-color: #ff3333;
+        }
+
+        input[type="text"]::placeholder {
+            color: #888;
+        }
+
+        .btn-small {
+            padding: 15px 30px;
+            font-size: 16px;
+        }
+
+        .features {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 30px;
+            margin-top: 60px;
+            max-width: 1000px;
+            margin-left: auto;
+            margin-right: auto;
+        }
+
+        .feature-card {
+            /* Make the background a solid dark color with slight transparency */
+            background: rgba(20, 20, 20, 0.85);
+            border: 2px solid #ff3333;
+            border-radius: 15px;
+            padding: 30px;
+            text-align: center;
+            transition: all 0.3s ease;
+
+            /* This blurs the GIF specifically behind this card */
+            backdrop-filter: blur(10px);
+            -webkit-backdrop-filter: blur(10px);
+
+            /* Adds a subtle red glow to separate it from the background */
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+        }
+
+        .feature-card:hover {
+            transform: translateY(-10px);
+            background: rgba(40, 0, 0, 0.9);
+            /* Darkens slightly on hover */
+            box-shadow: 0 15px 40px rgba(255, 51, 51, 0.3);
+        }
+
+        .feature-icon {
+            font-size: 48px;
+            margin-bottom: 15px;
+        }
+
+        .feature-card h3 {
+            font-size: 20px;
+            margin-bottom: 10px;
+            color: #ff3333;
+        }
+
+        .feature-card p {
+            color: #ffffff;
+            /* Ensuring text is pure white */
+            font-family: Arial, sans-serif;
+            line-height: 1.4;
+            text-shadow: 1px 1px 2px rgba(0, 0, 0, 0.5);
+            /* Adds a tiny shadow to text for contrast */
+        }
+
+        /* How to Play Page Styles */
+        .how-to-play {
+            padding: 20px;
+        }
+
+        .how-to-play h2 {
+            text-align: center;
+            margin-bottom: 40px;
+        }
+
+        .phone-orientation {
+            /* Solid black-grey background to match feature cards */
+            background: rgba(15, 15, 15, 0.95);
+            border: 3px solid #ff3333;
+            /* Stronger red border */
+            border-radius: 15px;
+            padding: 30px;
+            margin-bottom: 40px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 20px;
+
+            /* Blur effect for the GIF behind it */
+            backdrop-filter: blur(10px);
+            -webkit-backdrop-filter: blur(10px);
+
+            /* Shadow to make it pop */
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.8);
+        }
+
+        .phone-orientation-text {
+            flex: 1;
+            text-align: left;
+        }
+
+        .phone-orientation-text h3 {
+            color: #ff3333;
+            font-size: 28px;
+            margin-bottom: 15px;
+            text-transform: uppercase;
+        }
+
+        .phone-orientation-text p {
+            font-family: 'Arial', sans-serif;
+            font-weight: bold;
+            font-size: 18px;
+            color: #ffffff;
+            /* Bright white text for readability */
+        }
+
+        .phone-orientation-image {
+            flex: 0 0 200px;
+            height: 150px;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            background: rgba(255, 255, 255, 0.1);
+            border: 2px dashed #ff3333;
+            border-radius: 10px;
+            color: #888;
+            font-style: italic;
+        }
+
+        .phone-orientation-image img {
+            max-width: 100%;
+            max-height: 100%;
+            border-radius: 8px;
+        }
+
+        .mechanics-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 30px;
+        }
+
+        .mechanics-section {
+            /* Solid gradient background for maximum readability */
+            background: linear-gradient(145deg, rgba(30, 30, 30, 0.9), rgba(15, 15, 15, 0.95));
+            border: 2px solid rgba(255, 51, 51, 0.4);
+            border-radius: 15px;
+            padding: 30px;
+            backdrop-filter: blur(8px);
+            -webkit-backdrop-filter: blur(8px);
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.8);
+        }
+
+        .mechanics-section h3 {
+            color: #ff3333;
+            font-size: 24px;
+            margin-bottom: 20px;
+            border-bottom: 2px solid #ff3333;
+            padding-bottom: 10px;
+            text-transform: uppercase;
+        }
+
+        .mechanics-section ul {
+            list-style-type: none;
+        }
+
+        .mechanics-section li {
+            font-family: Arial, sans-serif;
+            font-size: 16px;
+            color: #ddd;
+            margin-bottom: 15px;
+            position: relative;
+            padding-left: 20px;
+            font-weight: 500;
+            text-shadow: 1px 1px 1px rgba(0, 0, 0, 0.8);
+
+        }
+
+
+        .mechanics-section li::before {
+            content: '•';
+            color: #ff3333;
+            position: absolute;
+            left: 0;
+            font-weight: bold;
+        }
+
+        footer {
+            background: rgba(0, 0, 0, 0.5);
+            padding: 20px;
+            text-align: center;
+            margin-top: 40px;
+        }
+
+        footer p {
+            color: #888;
+            font-size: 14px;
+            font-family: Arial, sans-serif;
+            font-weight: normal;
+        }
+    </style>
+</head>
+
+<body>
+    <header>
+        <nav>
+            <div class="logo-container" onclick="showPage('home')">
+                <img src="./KOTRclean.png" alt=" KING OF THE RING" class="logo-image">
+                <img src="./KOTRtext.png" alt=" KING OF THE RING" class="logo-image-text">
+            </div>
+            <ul class="nav-links">
+                <li><a onclick="showPage('home')">Home</a></li>
+                <li><a onclick="showPage('how-to-play')">How to Play</a></li>
+            </ul>
+        </nav>
+    </header>
+
+
+    <main>
+        <!-- Home Page -->
+        <div id="home" class="page active hero">
+            <h1>Join the boxing ARENA</h1>
+            <p class="subtitle">Experience the excitement of boxing using your phone's motion sensors</p>
+
+            <div class="cta-container">
+                <button class="btn btn-primary" onclick="createMatch()">Create Match</button>
+                <button class="btn btn-secondary" onclick="showJoinSection()">Join Match</button>
+            </div>
+
+            <div class="room-code-section" id="joinSection" style="display: none;">
+                <h2>Join a Match</h2>
+                <div class="input-group">
+                    <input type="text" id="roomCode" placeholder="Enter Room Code" maxlength="6">
+                    <button class="btn btn-primary btn-small" onclick="joinMatch()">Join</button>
+                </div>
+            </div>
+
+            <div class="features">
+                <div class="feature-card">
+                    <div class="feature-icon">📱</div>
+                    <h3>Motion Controls</h3>
+                    <p>Swing your arm and angle your phone to throw punches and dodge attacks </p>
+                </div>
+                <div class="feature-card">
+                    <div class="feature-icon">🌐</div>
+                    <h3>Real-Time Battles</h3>
+                    <p>Connect with opponents anywhere for exciting, lag-free fights</p>
+                </div>
+                <div class="feature-card">
+                    <div class="feature-icon">🎮</div>
+                    <h3>Deep Mechanics</h3>
+                    <p>Master each move, predict your opponents, and punish with combos! </p>
+                </div>
+            </div>
+        </div>
+
+        <!-- How to Play Page -->
+        <div id="how-to-play" class="page how-to-play">
+            <h2>Learn to Box with your Phone</h2>
+
+            <div class="phone-orientation">
+                <div class="phone-orientation-text">
+                    <h3>Phone Orientation</h3>
+                    <p>Hold phone vertically upwards with screen facing left</p>
+                </div>
+                <div class="phone-orientation-image">
+                    <img src="./PhoneOrientation.png" alt="Stance Demonstration">
+                </div>
+            </div>
+
+            <div class="mechanics-grid">
+                <div class="mechanics-section">
+                    <h3>Sensor Data</h3>
+                    <ul>
+                        <h4>Accelerometer</h4>
+                        <li>Uses your phone's built in accelerometer
+                            <br>- Determines which direction your arm is moving
+                            <br>- Decides which attack or move to choose
+                    </ul>
+                    <br>
+                    <ul>
+                        <h4>Gyroscope</h4>
+                        <li>Uses your phone's built in gyroscope
+                            <br>- Determines the angle at which the device is held
+                            <br>- Decides whether or not attacks or moves can be initiated
+                        </li>
+                    </ul>
+                </div>
+                <div class="mechanics-section">
+                    <h3>Game Mechanics</h3>
+                    <ul>
+                        <li>Game Duration: 90 seconds</li>
+                        <li>How to win:
+                            <br>- Knock your opponent out!
+                            <br>- Have more HP than your opponent end of the match
+                        </li>
+                        <li>Health Bar: 100 HP</li>
+                        <li>Damage Types:
+                            <br>- Jab: 5 damage, fastest attack
+                            <br>- Right Hook: 7 damage, slight stun
+                            <br>- Uppercut: 10 damage, longer windup
+                        </li>
+                        <li>Last 30 Seconds: Double damage</li>
+                    </ul>
+                </div>
+            </div>
+
+            <div class="mechanics-grid" style="margin-top: 30px;">
+                <div class="mechanics-section">
+                    <h3>Stamina Mechanics</h3>
+                    <ul>
+                        <li>Each player has a stamina bar which slowly regenerates over time</li>
+                        <li>Attacks consume different stamina:
+                            <br>- Jabs: Low stamina cost
+                            <br>- Right Hooks: Medium stamina
+                            <br>- Uppercuts: High stamina cost
+                            <br>- Block: Regenerates stamina
+                        </li>
+                        <li>Low stamina reduces punch damage and attack speed </li>
+                    </ul>
+                </div>
+
+                <div class="mechanics-section">
+                    <h3>Advanced Mechanics</h3>
+                    <ul>
+                        <li>Combo Bar: Increases punch damage and attack speed if many shots are landed consecutively
+                        </li>
+                        <li>Blocking: Reduces incoming damage but prevents the user from attacking during this time</li>
+                        <li>Dodge Mechanic:
+                            <br>- Tilt the phone left/right to dodge
+                            <br>- If a strike is successfully dodged, you will charge up both your stamina and combo!
+                        </li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <footer>
+        <p>&copy; 2026 King of the Ring - A New Way to Box</p>
+    </footer>
+
+    <script>
+        function showPage(pageId) {
+            // Hide all pages
+            const pages = document.getElementsByClassName('page');
+            for (let page of pages) {
+                page.classList.remove('active');
+            }
+
+            // Show selected page
+            document.getElementById(pageId).classList.add('active');
+        }
+
+        function createMatch() {
+            // Generate random room code
+            const roomCode = Math.floor(1000 + Math.random() * 9000);
+            alert(`Room Created!\n\nYour Room Code: ${roomCode}\n\nShare this code with your opponent to start the match.`);
+            // Here you would typically redirect to the game lobby
+            // window.location.href = `/lobby?code=${roomCode}`;
+        }
+
+        function showJoinSection() {
+            const joinSection = document.getElementById('joinSection');
+            if (joinSection.style.display === 'none') {
+                joinSection.style.display = 'block';
+            } else {
+                joinSection.style.display = 'none';
+            }
+        }
+
+        function joinMatch() {
+            const roomCode = document.getElementById('roomCode').value.trim();
+            if (roomCode.length === 0) {
+                alert('Please enter a room code!');
+                return;
+            }
+            if (roomCode.length != 4) {
+                alert('Room code must be 4 characters!');
+                return;
+            }
+            alert(`Joining room: ${roomCode}`);
+            // Here you would typically connect to the room via WebSocket
+            // window.location.href = `/lobby?code=${roomCode}`;
+        }
+
+        // Allow Enter key to join match
+        document.getElementById('roomCode')?.addEventListener('keypress', function (e) {
+            if (e.key === 'Enter') {
+                joinMatch();
+            }
+        });
+    </script>
+</body>
+
+</html>
