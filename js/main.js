@@ -1088,6 +1088,10 @@ function resetGameState() {
   if (timerEl) timerEl.classList.remove('danger');
   // Clear any winner banner from the previous round.
   hideWinnerBanners();
+  // Drop any in-flight KO slow-mo so the next round runs at full speed.
+  koSlowStartedAt = 0;
+  // Kill any pending or active winner-orbit cinematic.
+  cancelKOPan();
   // Tell phones the no-block phase is off (they may have been locked).
   notifyPlayer('P1', 'no_block_phase', { active: false });
   notifyPlayer('P2', 'no_block_phase', { active: false });
@@ -1899,6 +1903,11 @@ function triggerHitNode(attacker, defender, baseDamage, attackType = "jab") {
     defender.physics.camRotVel.x -= 30;
     triggerBlackout(defender, 1, 0);
     crowdInstance.setState("KNOCKOUT_REACTION");
+    // Cinematic slow-mo on the knockout — eases time down to 0.1× and
+    // back to 1× over KO_SLOW_DURATION_MS, peaking at the midpoint.
+    triggerKOSlowMo();
+    // 3s later, swing the camera around the winner.
+    scheduleKOPan(attacker);
     // KO ends the round immediately — attacker wins regardless of HP math.
     endRound('KO', playerSlot(attacker));
   } else if (!defender.state.isKnockedOut) {
@@ -2121,16 +2130,94 @@ function processActions(p, defender, time, deltaTime) {
 // 5. Render Loop with Split Screen
 const clock = new THREE.Clock();
 let previousTime = 0;
+let scaledTime = 0;     // cumulative TIME-SCALED time, for systems that read elapsed seconds
+
+// ---- KO winner-orbit cinematic ----
+// 3 seconds after a knockout, the renderer ditches the split-screen view
+// and renders a single full-screen orbit camera around the winner. The
+// existing winner banner stays visible (it's a half-screen overlay; the
+// half it occupies signals the winning side).
+const KO_PAN_DELAY_MS    = 3000;     // delay after KO before the pan begins
+const KO_PAN_RADIUS      = 3.6;      // distance from winner (world units)
+const KO_PAN_HEIGHT      = 1.85;     // camera Y
+const KO_PAN_LOOK_HEIGHT = 1.05;     // y the camera aims at on the winner
+const KO_PAN_ANGULAR_SPEED = 0.45;   // rad/sec — full orbit ≈ 14s
+const koPanCamera = new THREE.PerspectiveCamera(50, 1, 0.1, 100);
+let koPanActive   = false;
+let koPanStartedAt = 0;
+let koPanWinner   = null;
+let koPanScheduledTimer = 0;
+
+// Schedule the pan to take over rendering after KO_PAN_DELAY_MS. Cancellable
+// from RESTART (in resetGameState) so it doesn't kick in during the next round.
+function scheduleKOPan(winnerPlayer) {
+  if (!winnerPlayer) return;
+  if (koPanScheduledTimer) clearTimeout(koPanScheduledTimer);
+  koPanScheduledTimer = setTimeout(() => {
+    koPanScheduledTimer = 0;
+    koPanWinner = winnerPlayer;
+    koPanStartedAt = performance.now();
+    koPanActive = true;
+  }, KO_PAN_DELAY_MS);
+}
+
+function cancelKOPan() {
+  if (koPanScheduledTimer) { clearTimeout(koPanScheduledTimer); koPanScheduledTimer = 0; }
+  koPanActive = false;
+  koPanWinner = null;
+}
+
+// ---- KO slow-mo time scale ----
+// Triggered from the KO branch in triggerHitNode. Shape is a fast ramp-in
+// to KO_SLOW_MIN_SCALE, a long hold there, then a slower ramp back to 1.0.
+// The ramp-in is intentionally short (~150ms) so the very-first frames of
+// the knockdown — the impulses applied to spine/avatar/cam — are captured
+// inside the slow-mo, rather than running at full speed before the dip.
+const KO_SLOW_DURATION_MS  = 1500;
+const KO_SLOW_RAMP_IN_MS   = 150;
+const KO_SLOW_RAMP_OUT_MS  = 1000;
+const KO_SLOW_MIN_SCALE    = 0.3;
+let koSlowStartedAt = 0;     // performance.now(); 0 = not active
+
+function triggerKOSlowMo() {
+  koSlowStartedAt = performance.now();
+}
+
+function currentTimeScale(nowMs) {
+  if (!koSlowStartedAt) return 1.0;
+  const elapsed = nowMs - koSlowStartedAt;
+  if (elapsed >= KO_SLOW_DURATION_MS) {
+    koSlowStartedAt = 0;
+    return 1.0;
+  }
+  // Ramp in: 1.0 → MIN over RAMP_IN_MS
+  if (elapsed < KO_SLOW_RAMP_IN_MS) {
+    const t = elapsed / KO_SLOW_RAMP_IN_MS;
+    return 1 - (1 - KO_SLOW_MIN_SCALE) * easeOutCubic(t);
+  }
+  // Ramp out: MIN → 1.0 over RAMP_OUT_MS at the tail
+  const tailStart = KO_SLOW_DURATION_MS - KO_SLOW_RAMP_OUT_MS;
+  if (elapsed > tailStart) {
+    const t = (elapsed - tailStart) / KO_SLOW_RAMP_OUT_MS;
+    return KO_SLOW_MIN_SCALE + (1 - KO_SLOW_MIN_SCALE) * easeOutCubic(t);
+  }
+  // Hold at the floor.
+  return KO_SLOW_MIN_SCALE;
+}
 
 function animate() {
   requestAnimationFrame(animate);
 
   const time = clock.getElapsedTime();
-  const deltaTime = Math.min(time - previousTime, 0.1); // Safe delta calc max 0.1
+  const realDelta = Math.min(time - previousTime, 0.1); // Safe delta calc max 0.1
   previousTime = time;
 
-  processActions(player1, player2, time, deltaTime);
-  processActions(player2, player1, time, deltaTime);
+  const tScale = currentTimeScale(performance.now());
+  const deltaTime = realDelta * tScale;
+  scaledTime += deltaTime;
+
+  processActions(player1, player2, scaledTime, deltaTime);
+  processActions(player2, player1, scaledTime, deltaTime);
 
   // Override player positions while the intro is running. Runs AFTER the
   // physics so it wins, BEFORE updateCameras() so cameras frame the march.
@@ -2139,14 +2226,44 @@ function animate() {
   ring.update(deltaTime);
   crowdInstance.update(deltaTime);
 
+  // Round timer reads performance.now() directly — keeps real-time so the
+  // slow-mo doesn't extend the round artificially.
   updateRoundTimer();
   updateCameras();
 
-  // Render Split Screen
   const w = window.innerWidth;
   const h = window.innerHeight;
   const halfW = Math.floor(w / 2);
 
+  if (koPanActive && koPanWinner) {
+    // Full-screen orbit cinematic around the winner.
+    const winnerPos = koPanWinner.rootGroup.position;
+    const elapsedSec = (performance.now() - koPanStartedAt) / 1000;
+    const angle = elapsedSec * KO_PAN_ANGULAR_SPEED;
+    koPanCamera.position.set(
+      winnerPos.x + Math.cos(angle) * KO_PAN_RADIUS,
+      KO_PAN_HEIGHT,
+      winnerPos.z + Math.sin(angle) * KO_PAN_RADIUS,
+    );
+    koPanCamera.lookAt(winnerPos.x, KO_PAN_LOOK_HEIGHT, winnerPos.z);
+
+    // Both players visible at full size for the cinematic.
+    setPlayerViewMode(player1, true);
+    setPlayerViewMode(player2, true);
+
+    if (koPanCamera.aspect !== w / h) {
+      koPanCamera.aspect = w / h;
+      koPanCamera.updateProjectionMatrix();
+    }
+    renderer.setViewport(0, 0, w, h);
+    renderer.setScissor(0, 0, w, h);
+    renderer.setClearColor(0x87ceeb);
+    renderer.clear();
+    renderer.render(scene, koPanCamera);
+    return;
+  }
+
+  // Render Split Screen
   // p1 view
   renderer.setViewport(0, 0, halfW, h);
   renderer.setScissor(0, 0, halfW, h);
