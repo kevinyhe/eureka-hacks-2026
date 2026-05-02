@@ -81,6 +81,7 @@
   #detected.move-DODGE_RIGHT { background: #06b6d4; }
   #detected.move-DODGE_BACK  { background: #0e7490; }
   #detected.move-BLOCK        { background: #16a34a; }
+  #detected.move-UNBLOCK      { background: #4b5563; }
   #detected.move-IDLE        { background: #1f2937; }
 
   /* WebSocket connection-status badge */
@@ -131,6 +132,49 @@
     margin-top: 18px; font-size: 12px; color: #777; text-decoration: underline; cursor: pointer;
   }
   #joinOverlay #joinErr { color: #f87171; font-size: 12px; min-height: 16px; margin-top: 10px; }
+
+  /* Player-slot banner — appears across the top once joined, color-coded
+     to match the renderer's HUD scheme: P1 red, P2 blue. */
+  #playerSlot {
+    display: none;
+    margin: -12px -12px 12px -12px;
+    padding: 14px 16px;
+    text-align: center;
+    font-weight: 900;
+    letter-spacing: 6px;
+    color: #fff;
+    font-size: 22px;
+    text-shadow: 0 2px 6px rgba(0,0,0,0.45);
+    border-bottom: 4px solid rgba(0,0,0,0.35);
+  }
+  #playerSlot.slot-P1 { display: block; background: #ff5555; }
+  #playerSlot.slot-P2 { display: block; background: #5555ff; }
+  /* Subtle full-page tint by side, so the phone looks like its team. */
+  body.team-P1 { box-shadow: inset 0 0 0 4px rgba(255, 85, 85, 0.55); }
+  body.team-P2 { box-shadow: inset 0 0 0 4px rgba(85, 85, 255, 0.55); }
+
+  /* No-block-phase banner — replaces the player-slot banner during the
+     last seconds of the round so the player sees in big red letters that
+     blocking is disabled. Pulses for emphasis. */
+  #noBlockBanner {
+    display: none;
+    margin: -12px -12px 12px -12px;
+    padding: 14px 16px;
+    text-align: center;
+    font-weight: 900;
+    letter-spacing: 8px;
+    font-size: 20px;
+    color: #fff;
+    background: #dc2626;
+    text-shadow: 0 2px 6px rgba(0,0,0,0.5);
+    border-bottom: 4px solid rgba(0,0,0,0.45);
+    animation: noblock-pulse 1s ease-in-out infinite;
+  }
+  #noBlockBanner.active { display: block; }
+  @keyframes noblock-pulse {
+    0%,100% { background: #dc2626; }
+    50%     { background: #ef4444; }
+  }
 </style>
 </head>
 <body>
@@ -152,6 +196,8 @@
 </button>
 
 <main id="app">
+  <div id="playerSlot"></div>
+  <div id="noBlockBanner">⚠ NO BLOCK ⚠</div>
   <div id="status">connecting…</div>
 
   <div id="detected" class="move-IDLE">
@@ -302,6 +348,10 @@ let ws = null;
 let wsRoomCode = '';
 let wsJoinedAs = null;            // 'P1' | 'P2' | null
 let pendingBlockEnd = 0;
+// True while the phone has sent block_start but not yet sent block_end.
+// While true, classify() suppresses every move except UNBLOCK so the
+// player can't accidentally throw a punch / dodge mid-block.
+let isBlockingLocal = false;
 
 const wsBadge     = document.getElementById('wsBadge');
 const wsBadgeText = document.getElementById('wsBadgeText');
@@ -363,10 +413,27 @@ function connectWs() {
   ws.addEventListener('message', (ev) => {
     let msg;
     try { msg = JSON.parse(ev.data); } catch { return; }
+    if (msg.type === 'player:event' && msg.data) {
+      console.log('[ws] player:event', msg.data.event, msg.data.data || {});
+      handlePlayerEvent(msg.data.event, msg.data.data || {});
+      return;
+    }
     if (msg.type === 'room:joined' && msg.data) {
       wsJoinedAs = msg.data.playerId || 'P?';
       console.log('[ws] joined as', wsJoinedAs, 'in room', msg.data.roomCode);
       setBadge('green', wsJoinedAs + ' · ' + (msg.data.roomCode || wsRoomCode));
+      // Reveal a big colored banner naming the slot. Colors mirror the
+      // renderer's HUD: P1 red (#ff5555), P2 blue (#5555ff).
+      const slotEl = document.getElementById('playerSlot');
+      slotEl.classList.remove('slot-P1', 'slot-P2');
+      document.body.classList.remove('team-P1', 'team-P2');
+      if (wsJoinedAs === 'P1' || wsJoinedAs === 'P2') {
+        slotEl.classList.add('slot-' + wsJoinedAs);
+        slotEl.textContent = (wsJoinedAs === 'P1' ? 'PLAYER 1 — RED' : 'PLAYER 2 — BLUE');
+        document.body.classList.add('team-' + wsJoinedAs);
+      } else {
+        slotEl.textContent = wsJoinedAs;
+      }
       // Hide the join overlay if it's still up.
       joinOverlay.classList.remove('active');
     } else if (msg.type === 'error' && msg.data) {
@@ -440,16 +507,94 @@ function showJoinFlow() {
   }
 }
 
+// ============================================================
+// HAPTIC FEEDBACK
+// Short buzz when YOU throw an attack (immediate local feedback).
+// Long buzz when YOU land or take a hit (server-driven via player:event).
+// Whether the phone honors it depends on the OS — iOS Safari ignores
+// navigator.vibrate entirely; Android Chrome respects it. Calls are
+// guarded so missing API is a no-op.
+// ============================================================
+const HAPTIC_ATTACK_MS = 35;
+const HAPTIC_HIT_MS    = 180;
+
+function vibrate(durationMs) {
+  try {
+    if (typeof navigator !== 'undefined' && typeof navigator.vibrate === 'function') {
+      navigator.vibrate(durationMs);
+    }
+  } catch {}
+}
+
+// True for the duration of the FIGHT's last 15 seconds. While true the
+// phone refuses to fire BLOCK locally (UNBLOCK still passes — it's a
+// release, never a defensive guard).
+let noBlockingPhase = false;
+
+function handlePlayerEvent(event, data) {
+  switch (event) {
+    case 'hit_landed':       // your attack connected
+    case 'hit_taken':        // you ate one
+      vibrate(HAPTIC_HIT_MS);
+      break;
+    case 'block_broken':
+      // Renderer broke our block. Flip the local lock off immediately and
+      // cancel the pending auto-end timer so we don't double-send block_end.
+      if (pendingBlockEnd) { clearTimeout(pendingBlockEnd); pendingBlockEnd = 0; }
+      isBlockingLocal = false;
+      vibrate(HAPTIC_HIT_MS);   // also a strong buzz — the block was forced down
+      break;
+    case 'no_block_phase':
+      // Renderer says: last 15s, blocking is disabled.
+      noBlockingPhase = !!(data && data.active);
+      console.log('[event] no_block_phase active=', noBlockingPhase);
+      // If blocking right now, drop it.
+      if (noBlockingPhase && isBlockingLocal) {
+        if (pendingBlockEnd) { clearTimeout(pendingBlockEnd); pendingBlockEnd = 0; }
+        isBlockingLocal = false;
+        // Tell server we're no longer blocking.
+        sendWs('player:block_end', {});
+      }
+      // Surface in the badge so the user can see when it activates.
+      if (noBlockingPhase) {
+        setBadge('red', 'NO BLOCK · ' + (wsJoinedAs || ''));
+      } else if (wsJoinedAs) {
+        setBadge('green', wsJoinedAs + ' · ' + (wsRoomCode || ''));
+      }
+      // Big in-page banner so the user can't miss it.
+      const nbb = document.getElementById('noBlockBanner');
+      if (nbb) nbb.classList.toggle('active', noBlockingPhase);
+      break;
+    default:
+      break;
+  }
+}
+
 // Map a local move name to a wire send. Returns true if anything was sent.
 function sendMoveToServer(localMove) {
   if (!ws || ws.readyState !== WebSocket.OPEN) return false;
   if (!wsJoinedAs) return false;          // not yet a player in a room
+  // UNBLOCK is the explicit cancel for BLOCK: cancel any pending auto-end
+  // timer, fire block_end immediately. Doesn't go through ACTION_MAP.
+  if (localMove === 'UNBLOCK') {
+    if (pendingBlockEnd) { clearTimeout(pendingBlockEnd); pendingBlockEnd = 0; }
+    isBlockingLocal = false;
+    return sendWs('player:block_end', {});
+  }
   if (HELD_MOVES.has(localMove)) {
+    // Hard gate: never start a block during the no-block phase, no matter
+    // what classify() returned.
+    if (noBlockingPhase) {
+      console.log('[ws] BLOCK suppressed — noBlockingPhase is active');
+      return false;
+    }
     sendWs('player:block_start', {});
+    isBlockingLocal = true;
     if (pendingBlockEnd) clearTimeout(pendingBlockEnd);
     pendingBlockEnd = setTimeout(() => {
       sendWs('player:block_end', {});
       pendingBlockEnd = 0;
+      isBlockingLocal = false;
     }, BLOCK_END_DELAY_MS);
     return true;
   }
@@ -460,6 +605,13 @@ function sendMoveToServer(localMove) {
   }
   return sendWs('player:action', { action: wire });
 }
+
+// Move names that should trigger the SHORT attack haptic when detected
+// locally — fires whether or not the network is connected.
+const ATTACK_HAPTIC_MOVES = new Set([
+  'JAB', 'HOOK', 'UPPERCUT',
+  'DODGE_LEFT', 'DODGE_RIGHT', 'DODGE_BACK',
+]);
 
 // Cache row references so we don't requery per frame.
 const ROW_CACHE = {};
@@ -527,15 +679,27 @@ const BETA_DODGE_HI = 130;
 const GAMMA_RATE_BACKDODGE = -100;   // °/s;
 const BETA_X_LO = 60;           // JAB / DODGE_BACK only when β ∈ [60, 120]
 const BETA_X_HI = 120;
-const BETA_RATE_BLOCK = 200;     // °/s; large positive β rotation rate → BLOCK
+const BETA_RATE_BLOCK   =  200;  // °/s; large positive β rotation rate → BLOCK
+const BETA_RATE_UNBLOCK = -200;  // °/s; same axis, opposite sign → UNBLOCK (cancels block)
 
 function classify() {
-  // BLOCK: large positive β rotation rate (independent of acceleration).
-  
+  // BLOCK / UNBLOCK: same axis (β̇), opposite signs.
+  //   β̇ >  BETA_RATE_BLOCK   → BLOCK
+  //   β̇ <  BETA_RATE_UNBLOCK → UNBLOCK   (cancels an active block)
   const betaRate = raw.r.beta;
-  if (typeof betaRate === 'number' && betaRate > BETA_RATE_BLOCK) {
-    return { move: 'BLOCK', axis: 'β̇', value: betaRate };
+  if (typeof betaRate === 'number') {
+    // UNBLOCK first — it must always pass even while blocking, since it's
+    // the only way out of a block.
+    if (betaRate < BETA_RATE_UNBLOCK) return { move: 'UNBLOCK', axis: 'β̇', value: betaRate };
+    // BLOCK gated by: not currently blocking AND not in the last-15s no-block phase.
+    if (!isBlockingLocal && !noBlockingPhase && betaRate > BETA_RATE_BLOCK) {
+      return { move: 'BLOCK', axis: 'β̇', value: betaRate };
+    }
   }
+  // While the phone is in its block window, suppress every other move so
+  // the user can't accidentally throw a punch / dodge mid-block. Only
+  // UNBLOCK (handled above) escapes the lock.
+  if (isBlockingLocal) return null;
   const x = raw.a.x, y = raw.a.y, z = raw.a.z;
   if (typeof x !== 'number' || typeof y !== 'number' || typeof z !== 'number') return null;
   const ax = Math.abs(x), ay = Math.abs(y), az = Math.abs(z);
@@ -613,6 +777,8 @@ function updateDetected() {
     detWhy.textContent = hit.axis + ' = ' + (hit.value >= 0 ? '+' : '') + hit.value.toFixed(2) +
       (hit.extra ? '  ·  ' + hit.extra : '') +
       '  ·  peak |a| > ' + CLASSIFIER_THRESHOLD;
+    // Local haptic — fires immediately on detection, no WS dependency.
+    if (ATTACK_HAPTIC_MOVES.has(hit.move)) vibrate(HAPTIC_ATTACK_MS);
     // Network: relay to the server. No-op if WS isn't open or we haven't
     // joined a room yet — local detection keeps working either way.
     try { sendMoveToServer(hit.move); } catch (err) { console.warn('[ws] send hook threw:', err); }

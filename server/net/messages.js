@@ -4,6 +4,7 @@ import { z } from 'zod';
 export const MessageType = Object.freeze({
   // client -> server
   DISPLAY_CREATE_ROOM: 'display:create_room',
+  DISPLAY_NOTIFY:      'display:notify',     // display addresses an event to a specific player slot
   PLAYER_JOIN: 'player:join',
   PLAYER_ACTION: 'player:action',
   PLAYER_BLOCK_START: 'player:block_start',
@@ -15,6 +16,7 @@ export const MessageType = Object.freeze({
   ROOM_JOINED: 'room:joined',
   ROOM_PLAYER_STATUS: 'room:player_status',
   PLAYER_ACTION_RELAY: 'player:action_relay',
+  PLAYER_EVENT:        'player:event',       // server pushes a game-logic event to a specific phone
   ERROR: 'error',
   PONG: 'pong',
 });
@@ -70,9 +72,19 @@ const PlayerActionData = z.object({
   power: z.number().finite().optional(),
 });
 
+// display:notify — open-ended `data` payload so we can extend events
+// (hit_landed, hit_taken, block_broken, no_block_phase, …) without
+// touching the schema.
+const DisplayNotifyData = z.object({
+  targetSlot: z.enum(['P1', 'P2']),
+  event: z.string().min(1).max(64),
+  data: z.object({}).passthrough().optional(),
+});
+
 /** Per-type `data` schemas, keyed by message type. */
 export const InboundDataSchemas = Object.freeze({
   [MessageType.DISPLAY_CREATE_ROOM]: EmptyData,
+  [MessageType.DISPLAY_NOTIFY]: DisplayNotifyData,
   [MessageType.PLAYER_JOIN]: PlayerJoinData,
   [MessageType.PLAYER_ACTION]: PlayerActionData,
   [MessageType.PLAYER_BLOCK_START]: EmptyData,

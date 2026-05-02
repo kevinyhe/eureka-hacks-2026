@@ -334,21 +334,21 @@ const ACTIONS = {
     l: new THREE.Vector3(-0.26, 1.78, 0.52),
     r: new THREE.Vector3(0.26, 1.78, 0.52),
     damage: 0,
-    staminaCost: 25,
+    staminaCost: 15,
   },
   dodge: {
     duration: 0.26,
     l: new THREE.Vector3(-0.42, 1.22, 0.3),
     r: new THREE.Vector3(0.42, 1.22, 0.3),
     damage: 0,
-    staminaCost: 33,
+    staminaCost: 5,
   },
   backDodge: {
-    duration: 0.3,
+    duration: 0.5,
     l: new THREE.Vector3(-0.34, 1.32, 0.28),
     r: new THREE.Vector3(0.34, 1.32, 0.28),
     damage: 0,
-    staminaCost: 33,
+    staminaCost: 10,
   },
   heal: {
     duration: 3.0,
@@ -812,7 +812,421 @@ function updateCameras() {
   camera2.rotation.x += player2.physics.camRot.x * 0.6;
   camera2.rotation.y += player2.physics.camRot.y * 0.6;
   camera2.rotation.z += player2.physics.camRot.z * 0.6;
+
+  applyIntroZoom();
 }
+
+// ------------------------------------------------------------
+// INTRO SEQUENCE — fade to black, snap cameras far out, fade back in,
+// then ease cameras into their gameplay positions over INTRO_ZOOM_MS.
+// Triggered by the START GAME button. Pure renderer-side; no network.
+// ------------------------------------------------------------
+const INTRO_FADE_MS  = 700;
+const INTRO_HOLD_MS  = 250;
+const INTRO_ZOOM_MS  = 2400;
+const COUNTDOWN_STEP_MS = 800;       // each of "3", "2", "1", "FIGHT" shown this long
+const INTRO_PULL_DISTANCE = 6.0;     // additive units, world-space, behind gameplay framing
+const PLAYER_ENTRY_OFFSET = 3.5;     // how far past gameplay z each player starts
+
+const introState = {
+  active: false,
+  zoomStartMs: 0,        // performance.now() at ease start; 0 = snapped (not easing yet); -1 = ease finished
+  marchStartMs: 0,       // performance.now() at march start; 0 = not started; -1 = finished
+  marchDurationMs: 0,    // computed at click — covers zoom + first three countdown beats
+  p1GameZ: 0,
+  p2GameZ: 0,
+};
+
+// Whole-game gate. False until "FIGHT!" appears. While false: no damage,
+// HUD bars hidden via the body class. Set true at the FIGHT countdown beat;
+// reset to false on a fresh START GAME tap so the bars re-arm cleanly.
+let gameStarted = false;
+
+// Round timer + no-block phase.
+// Override via URL: ?round=20&noBlock=10  → 20-second round, last 10s no-block.
+// Useful for quickly verifying the no-block phase without waiting 45s.
+const __roundParams = new URLSearchParams(window.location.search);
+const __roundParam    = parseInt(__roundParams.get('round'),   10);
+const __noBlockParam  = parseInt(__roundParams.get('noBlock'), 10);
+const ROUND_DURATION_MS  = (Number.isFinite(__roundParam)   && __roundParam   > 0 ? __roundParam   : 60) * 1000;
+const NO_BLOCK_WINDOW_MS = (Number.isFinite(__noBlockParam) && __noBlockParam > 0 ? __noBlockParam : 15) * 1000;
+let roundEndAt    = 0;                       // performance.now() target; 0 = inactive
+let noBlockActive = false;                   // true once we've crossed into the no-block window
+let lastTickedSecond = null;                 // most recent whole-second mark we pulsed on
+
+function applyIntroZoom() {
+  if (!introState.active) return;
+  let pullDist;
+  if (introState.zoomStartMs === 0) {
+    pullDist = INTRO_PULL_DISTANCE;             // hidden behind black
+  } else if (introState.zoomStartMs > 0) {
+    const elapsed = performance.now() - introState.zoomStartMs;
+    const t = Math.min(1, elapsed / INTRO_ZOOM_MS);
+    pullDist = INTRO_PULL_DISTANCE * (1 - easeOutCubic(t));
+    if (t >= 1) introState.zoomStartMs = -1;    // ease finished
+  } else {
+    return;
+  }
+  if (pullDist <= 0.01) return;
+  pullCameraOut(camera1, player2.rootGroup.position, pullDist);
+  pullCameraOut(camera2, player1.rootGroup.position, pullDist);
+}
+
+// Push the camera further from its look target by `dist` world-units along
+// the existing (camera → -target) direction, then re-aim. Additive (vs
+// multiplicative scaling) keeps the framing predictable when the players
+// themselves are moving during the intro march.
+function pullCameraOut(cam, targetPos, dist) {
+  const dx = cam.position.x - targetPos.x;
+  const dy = cam.position.y - targetPos.y;
+  const dz = cam.position.z - targetPos.z;
+  const len = Math.sqrt(dx * dx + dy * dy + dz * dz);
+  if (len < 0.001) return;
+  const f = (len + dist) / len;
+  cam.position.set(
+    targetPos.x + dx * f,
+    targetPos.y + dy * f,
+    targetPos.z + dz * f,
+  );
+  cam.lookAt(targetPos.x, 1.2, targetPos.z);
+}
+
+// Snap players to their entry positions while the screen is fully black.
+function snapPlayersToEntry() {
+  const p1Sign = Math.sign(introState.p1GameZ - introState.p2GameZ) || 1;
+  const p2Sign = -p1Sign;
+  player1.rootGroup.position.z = introState.p1GameZ + p1Sign * PLAYER_ENTRY_OFFSET;
+  player2.rootGroup.position.z = introState.p2GameZ + p2Sign * PLAYER_ENTRY_OFFSET;
+  player1.rootGroup.position.y = 0;
+  player2.rootGroup.position.y = 0;
+  player1.rootGroup.rotation.z = 0;
+  player2.rootGroup.rotation.z = 0;
+}
+
+// Lerp player z back to gameplay positions over marchDurationMs, with a
+// small sine bob and side-to-side roll for a "waddle" feel.
+function applyIntroMarch() {
+  if (!introState.active) return;
+  if (introState.marchStartMs <= 0) return;
+  const elapsed = performance.now() - introState.marchStartMs;
+  const t = Math.min(1, elapsed / introState.marchDurationMs);
+  const eased = 1 - Math.pow(1 - t, 2);
+
+  const p1Sign = Math.sign(introState.p1GameZ - introState.p2GameZ) || 1;
+  const p2Sign = -p1Sign;
+  const p1Entry = introState.p1GameZ + p1Sign * PLAYER_ENTRY_OFFSET;
+  const p2Entry = introState.p2GameZ + p2Sign * PLAYER_ENTRY_OFFSET;
+  player1.rootGroup.position.z = p1Entry + (introState.p1GameZ - p1Entry) * eased;
+  player2.rootGroup.position.z = p2Entry + (introState.p2GameZ - p2Entry) * eased;
+
+  if (t < 1) {
+    const tt = elapsed / 1000;
+    const bob1 = Math.max(0, Math.sin(tt * 8.0)) * 0.06;            // lift only — never sink below floor
+    const bob2 = Math.max(0, Math.sin(tt * 8.0 + Math.PI * 0.6)) * 0.06;
+    const sway = Math.sin(tt * 4.0) * 0.07;
+    player1.rootGroup.position.y = bob1;
+    player2.rootGroup.position.y = bob2;
+    player1.rootGroup.rotation.z = sway;
+    player2.rootGroup.rotation.z = -sway;
+  } else {
+    player1.rootGroup.position.y = 0;
+    player2.rootGroup.position.y = 0;
+    player1.rootGroup.rotation.z = 0;
+    player2.rootGroup.rotation.z = 0;
+    introState.marchStartMs = -1;        // march done
+    if (introState.zoomStartMs === -1) introState.active = false;
+  }
+}
+
+// Update the timer HUD + drive the no-block transition. Called every frame
+// while the game is running.
+function updateRoundTimer() {
+  const el = document.getElementById('round-timer');
+  if (!el) return;
+  if (!gameStarted || roundEndAt <= 0) {
+    el.textContent = formatRoundTime(0);
+    el.classList.remove('danger');
+    return;
+  }
+  const remainingMs = Math.max(0, roundEndAt - performance.now());
+  el.textContent = formatRoundTime(remainingMs);
+
+  const inWindow = remainingMs <= NO_BLOCK_WINDOW_MS && remainingMs > 0;
+  if (inWindow !== noBlockActive) {
+    noBlockActive = inWindow;
+    el.classList.toggle('danger', noBlockActive);
+    console.log('[round-timer] no_block_phase active=', noBlockActive,
+      ' remainingMs=', remainingMs.toFixed(0),
+      ' rendererWs=', rendererWs?.readyState);
+    if (noBlockActive) {
+      lastTickedSecond = null;
+      // Force-end any active blocks on the renderer side and tell phones.
+      for (const p of [player1, player2]) {
+        if (p && p.state && p.state.action === 'block') {
+          p.state.action = 'idle';
+          p.state.timer = 0;
+          notifyPlayer(playerSlot(p), 'block_broken', {});
+        }
+      }
+      notifyPlayer('P1', 'no_block_phase', { active: true });
+      notifyPlayer('P2', 'no_block_phase', { active: true });
+    } else {
+      lastTickedSecond = null;
+    }
+  }
+
+  // Per-second "heartbeat" on the cameras during the no-block phase. Each
+  // time the integer second-mark of the remaining time changes, give both
+  // cameras a small upward bump + a short roll wobble. The existing physics
+  // damps it out within ~0.5s, so the next tick lands cleanly on top.
+  if (noBlockActive && remainingMs > 0) {
+    const sec = Math.ceil(remainingMs / 1000);
+    if (lastTickedSecond !== sec) {
+      lastTickedSecond = sec;
+      pulseCamerasOnce();
+    }
+  }
+
+  if (remainingMs === 0) {
+    // Round over by time-out — pick winner by HP, show end screen.
+    endRound('TIME', null);
+  }
+}
+
+// Subtle camera bump + roll wobble — fired once per second during the
+// no-block phase. Magnitudes tuned to be clearly felt without being
+// motion-sickness-inducing; existing damping settles it within ~500ms.
+// ----- Winner banner helpers -----
+// `which` is 'P1' | 'P2' | 'DRAW'. `reason` is a short subtitle ("KO", "TIME").
+function showWinnerBanner(which, reason) {
+  hideWinnerBanners();
+  let id;
+  if (which === 'P1') id = 'winner-p1';
+  else if (which === 'P2') id = 'winner-p2';
+  else id = 'winner-draw';
+  const el = document.getElementById(id);
+  if (!el) return;
+  if (reason && which !== 'DRAW') {
+    const sub = document.getElementById(id + '-sub');
+    if (sub) sub.textContent = reason;
+  }
+  // Restart the pop animation.
+  el.classList.remove('show');
+  void el.offsetWidth;
+  el.classList.add('show');
+}
+
+function hideWinnerBanners() {
+  for (const id of ['winner-p1', 'winner-p2', 'winner-draw']) {
+    const el = document.getElementById(id);
+    if (el) el.classList.remove('show');
+  }
+}
+
+// Decide the winner and kick off the end-screen. Used by both time-out
+// (in updateRoundTimer) and KO (in triggerHitNode). After this fires the
+// damage gate stays closed until RESTART.
+function endRound(reason, forcedWinner) {
+  if (!gameStarted && roundEndAt === 0 && forcedWinner == null) return;
+  gameStarted = false;
+  roundEndAt = 0;
+  noBlockActive = false;
+  lastTickedSecond = null;
+  const timerEl = document.getElementById('round-timer');
+  if (timerEl) timerEl.classList.remove('danger');
+  // Phones: clear no-block + tell their isBlockingLocal flags to drop.
+  notifyPlayer('P1', 'no_block_phase', { active: false });
+  notifyPlayer('P2', 'no_block_phase', { active: false });
+
+  let winner = forcedWinner;
+  if (winner == null) {
+    if      (player1.state.health > player2.state.health) winner = 'P1';
+    else if (player2.state.health > player1.state.health) winner = 'P2';
+    else                                                  winner = 'DRAW';
+  }
+  showWinnerBanner(winner, reason);
+}
+
+function pulseCamerasOnce() {
+  const BUMP_Y = 1.6;
+  const ROLL   = 0.55;
+  for (const p of [player1, player2]) {
+    if (!p || !p.physics) continue;
+    p.physics.camVel.y += BUMP_Y;
+    p.physics.camRotVel.z += (Math.random() < 0.5 ? -1 : 1) * ROLL;
+  }
+}
+
+function formatRoundTime(ms) {
+  const totalSec = Math.ceil(ms / 1000);
+  const m = Math.floor(totalSec / 60);
+  const s = totalSec % 60;
+  return String(m).padStart(2, '0') + ':' + String(s).padStart(2, '0');
+}
+
+function showCountdownStep(text, isFight) {
+  const el = document.getElementById('countdown');
+  if (!el) return;
+  el.textContent = text;
+  el.classList.remove('show', 'fight');
+  void el.offsetWidth;          // restart animation
+  if (isFight) el.classList.add('fight');
+  el.classList.add('show');
+}
+
+// Full reset to the pre-START-GAME menu state. Called by the restart button
+// and (defensively) at the start of every START GAME click.
+function resetGameState() {
+  gameStarted = false;
+  document.body.classList.remove('game-active');
+
+  // Round-timer reset so the next intro starts fresh.
+  roundEndAt = 0;
+  noBlockActive = false;
+  lastTickedSecond = null;
+  const timerEl = document.getElementById('round-timer');
+  if (timerEl) timerEl.classList.remove('danger');
+  // Clear any winner banner from the previous round.
+  hideWinnerBanners();
+  // Tell phones the no-block phase is off (they may have been locked).
+  notifyPlayer('P1', 'no_block_phase', { active: false });
+  notifyPlayer('P2', 'no_block_phase', { active: false });
+
+  // Per-player combat state.
+  for (const p of [player1, player2]) {
+    if (!p || !p.state) continue;
+    p.state.health = 100;
+    p.state.stamina = STAMINA_MAX;
+    p.state.comboHits = 0;
+    p.state.isKnockedOut = false;
+    p.state.action = 'idle';
+    p.state.timer = 0;
+    p.state.actionDuration = 0;
+    p.state.hitLanded = false;
+    p.state.shakeTimer = 0;
+    p.state.camChaosTimer = 0;
+    if (p.state.blackoutTimeout)   { clearTimeout(p.state.blackoutTimeout);   p.state.blackoutTimeout = null; }
+    if (p.state.dazedTimeout)      { clearTimeout(p.state.dazedTimeout);      p.state.dazedTimeout = null; }
+    if (p.state.hitConfirmTimeout) { clearTimeout(p.state.hitConfirmTimeout); p.state.hitConfirmTimeout = null; }
+
+    if (p.uiHp)      p.uiHp.style.width      = '100%';
+    if (p.uiStamina) p.uiStamina.style.width = '100%';
+    if (p.uiCombo)   p.uiCombo.style.width   = '0%';
+    if (p.uiBlackout) p.uiBlackout.style.opacity = '0';
+    if (p.uiDazed) {
+      p.uiDazed.classList.remove('active');
+      p.uiDazed.style.opacity = '';
+      p.uiDazed.style.setProperty('--dazed-blur', '0px');
+    }
+    if (p.uiHitConfirm) p.uiHitConfirm.classList.remove('active');
+  }
+
+  // Reset spine/cam physics to neutral so KO'd players stand up again
+  // when the next intro plays.
+  for (const p of [player1, player2]) {
+    if (!p || !p.physics) continue;
+    p.physics.spineTarget.set(0, 0, 0);
+    p.physics.spineVel.set(0, 0, 0);
+    p.physics.avatarVel.set(0, 0, 0);
+    p.physics.headVel.set(0, 0, 0);
+    p.physics.headRotVel.set(0, 0, 0);
+    p.physics.camVel.set(0, 0, 0);
+    p.physics.camRotVel.set(0, 0, 0);
+  }
+
+  // Reset countdown overlay (in case the restart fires mid-intro).
+  const cd = document.getElementById('countdown');
+  if (cd) cd.classList.remove('show', 'fight');
+
+  // Reset crowd reaction back to neutral if the API supports it.
+  if (crowdInstance && typeof crowdInstance.setState === 'function') {
+    try { crowdInstance.setState('NEUTRAL'); } catch {}
+  }
+
+  // Clear intro state — so the next click starts a fresh intro.
+  introState.active = false;
+  introState.zoomStartMs = 0;
+  introState.marchStartMs = 0;
+}
+
+(function wireStartGameButton() {
+  const btn = document.getElementById('start-game-btn');
+  const fade = document.getElementById('intro-fade');
+  const restartBtn = document.getElementById('restart-btn');
+  const roomLabel = document.getElementById('room-code-label');
+  if (!btn || !fade) return;
+
+  btn.addEventListener('click', () => {
+    if (introState.active) return;
+    btn.classList.add('hidden');
+    if (roomLabel) roomLabel.classList.add('hidden');
+    if (restartBtn) restartBtn.classList.remove('hidden');
+
+    // Defensive reset before re-running the intro.
+    resetGameState();
+
+    // Hide HUD + lock damage off until FIGHT.
+    gameStarted = false;
+    document.body.classList.remove('game-active');
+
+    // Snapshot scene-defined gameplay z so the march eases back to whatever
+    // positions the scene set up (rather than hard-coded values).
+    introState.p1GameZ = player1.rootGroup.position.z;
+    introState.p2GameZ = player2.rootGroup.position.z;
+    // Players reach gameplay exactly when "FIGHT!" pops.
+    introState.marchDurationMs = INTRO_ZOOM_MS + 3 * COUNTDOWN_STEP_MS;
+
+    fade.classList.add('active');                                // (1) fade to black
+
+    setTimeout(() => {
+      introState.active = true;                                  // (2) hidden snap
+      introState.zoomStartMs = 0;
+      introState.marchStartMs = 0;
+      snapPlayersToEntry();
+    }, INTRO_FADE_MS);
+
+    setTimeout(() => {
+      fade.classList.remove('active');                           // (3) fade back
+      introState.zoomStartMs  = performance.now();               // (4a) start camera ease
+      introState.marchStartMs = performance.now();               // (4b) start march
+    }, INTRO_FADE_MS + INTRO_HOLD_MS);
+
+    // Countdown beats — fire after the camera has zoomed in.
+    const countdownT0 = INTRO_FADE_MS + INTRO_HOLD_MS + INTRO_ZOOM_MS;
+    setTimeout(() => showCountdownStep('3', false),       countdownT0);
+    setTimeout(() => showCountdownStep('2', false),       countdownT0 + 1 * COUNTDOWN_STEP_MS);
+    setTimeout(() => showCountdownStep('1', false),       countdownT0 + 2 * COUNTDOWN_STEP_MS);
+    setTimeout(() => {
+      showCountdownStep('FIGHT!', true);
+      gameStarted = true;
+      document.body.classList.add('game-active');
+      // Round timer starts at FIGHT.
+      roundEndAt = performance.now() + ROUND_DURATION_MS;
+      noBlockActive = false;
+      // Tell both phones the no-block phase is *not* active yet (in case a
+      // previous round left their flags stuck true).
+      notifyPlayer('P1', 'no_block_phase', { active: false });
+      notifyPlayer('P2', 'no_block_phase', { active: false });
+    }, countdownT0 + 3 * COUNTDOWN_STEP_MS);
+    setTimeout(() => {
+      const el = document.getElementById('countdown');
+      if (el) el.classList.remove('show', 'fight');
+    }, countdownT0 + 4 * COUNTDOWN_STEP_MS);
+  });
+})();
+
+(function wireRestartButton() {
+  const btn      = document.getElementById('restart-btn');
+  const startBtn = document.getElementById('start-game-btn');
+  const roomLabel = document.getElementById('room-code-label');
+  if (!btn || !startBtn) return;
+  btn.addEventListener('click', () => {
+    resetGameState();
+    btn.classList.add('hidden');
+    startBtn.classList.remove('hidden');
+    if (roomLabel) roomLabel.classList.remove('hidden');
+  });
+})();
 
 // ------------------------------------------------------------
 // INPUT HANDLING
@@ -1026,13 +1440,60 @@ function ensureLiveDebugButton() {
   document.body.appendChild(button);
 }
 
+function updateConnectionIndicator(playerId, status) {
+  if (playerId !== "P1" && playerId !== "P2") return;
+  const id = playerId === "P1" ? "conn-p1" : "conn-p2";
+  const el = document.getElementById(id);
+  if (!el) return;
+  if (status === "connected") {
+    el.classList.add("connected");
+  } else {
+    el.classList.remove("connected");
+  }
+}
+
+function resetConnectionIndicators() {
+  for (const id of ["conn-p1", "conn-p2"]) {
+    const el = document.getElementById(id);
+    if (el) el.classList.remove("connected");
+  }
+}
+
+// Module-level handle so triggerHitNode / the game timer can send
+// display:notify to specific phones. Set inside connectRendererToServerRelay().
+let rendererWs = null;
+
+function playerSlot(p) {
+  if (p === player1) return "P1";
+  if (p === player2) return "P2";
+  return null;
+}
+
+function notifyPlayer(targetSlot, event, data = {}) {
+  if (!rendererWs || rendererWs.readyState !== WebSocket.OPEN) return;
+  if (targetSlot !== "P1" && targetSlot !== "P2") return;
+  try {
+    rendererWs.send(
+      JSON.stringify({
+        type: "display:notify",
+        data: { targetSlot, event, data },
+        t: Date.now(),
+      }),
+    );
+  } catch (err) {
+    console.warn("[notify] send failed:", err && err.message);
+  }
+}
+
 function connectRendererToServerRelay() {
   ensureLiveDebugButton();
 
   const connect = () => {
     const ws = new WebSocket(serverWsUrl);
+    rendererWs = ws;
 
     ws.addEventListener("open", () => {
+      resetConnectionIndicators();
       ws.send(
         JSON.stringify({
           type: "display:create_room",
@@ -1061,6 +1522,9 @@ function connectRendererToServerRelay() {
           } catch {
             // Storage might be blocked in hardened browser modes.
           }
+          // Surface the code on the start menu.
+          const codeEl = document.getElementById("room-code-value");
+          if (codeEl) codeEl.textContent = currentRoomCode;
         }
 
         if (liveDebugWindow && !liveDebugWindow.closed) {
@@ -1069,6 +1533,15 @@ function connectRendererToServerRelay() {
             window.location.origin,
           );
         }
+        return;
+      }
+
+      if (message?.type === "room:player_status") {
+        // Drive the P1/P2 connection pills off the server's status broadcasts.
+        updateConnectionIndicator(
+          message?.data?.playerId,
+          message?.data?.status,
+        );
         return;
       }
 
@@ -1190,6 +1663,12 @@ function setPlayerViewMode(p, isFront) {
 }
 function triggerBlackout(player, intensity, durationMs) {
   if (!player.uiBlackout) return;
+  // Once a player is knocked out, only allow the full-opacity permanent
+  // blackout to update — never let a later, weaker hit reduce intensity
+  // or schedule a clear that would un-blackout the camera.
+  if (player.state.isKnockedOut && (intensity < 0.95 || durationMs > 0)) {
+    return;
+  }
   player.uiBlackout.style.opacity = `${THREE.MathUtils.clamp(intensity, 0, 0.98)}`;
   if (player.state.blackoutTimeout) {
     clearTimeout(player.state.blackoutTimeout);
@@ -1203,12 +1682,33 @@ function triggerBlackout(player, intensity, durationMs) {
   }
 }
 
-function triggerHitConfirm(player, punchOffset) {
+// Power normalization: clamp damage onto a 0..1 curve so the burst /
+// ring / damage-number all scale meaningfully across the full hit range.
+// MIN ensures even a chip-damage block hit still gives a visible pop;
+// MAX is what an UPPERCUT-with-combo finisher might land at.
+const HIT_POWER_MIN_DAMAGE = 3;
+const HIT_POWER_MAX_DAMAGE = 30;
+function damageToHitPower(damage) {
+  const d = Math.max(HIT_POWER_MIN_DAMAGE, Math.min(HIT_POWER_MAX_DAMAGE, damage || 0));
+  return (d - HIT_POWER_MIN_DAMAGE) / (HIT_POWER_MAX_DAMAGE - HIT_POWER_MIN_DAMAGE);
+}
+
+function triggerHitConfirm(player, punchOffset, damage = 0) {
   if (!player.uiHitConfirm) return;
 
   const position = getHitConfirmPosition(punchOffset);
+  const power = damageToHitPower(damage);
   player.uiHitConfirm.style.setProperty("--hit-x", `${position.x}%`);
   player.uiHitConfirm.style.setProperty("--hit-y", `${position.y}%`);
+  player.uiHitConfirm.style.setProperty("--hit-power", power.toFixed(3));
+
+  // Update the damage-text child if present.
+  const dmgEl = player.uiHitConfirm.querySelector(".damage");
+  if (dmgEl) {
+    const rounded = Math.max(1, Math.round(damage || 0));
+    dmgEl.textContent = rounded.toString();
+  }
+
   player.uiHitConfirm.classList.remove("active");
   void player.uiHitConfirm.offsetWidth;
   player.uiHitConfirm.classList.add("active");
@@ -1219,7 +1719,7 @@ function triggerHitConfirm(player, punchOffset) {
   player.state.hitConfirmTimeout = setTimeout(() => {
     player.uiHitConfirm.classList.remove("active");
     player.state.hitConfirmTimeout = null;
-  }, 430);
+  }, 760);
 }
 
 function triggerDazed(player, damage) {
@@ -1274,22 +1774,50 @@ let recentHits = [];
 
 let crowdInstance = crowd;
 
+// Heavy hits with raw damage above this break the defender's block.
+// Raw damage = baseDamage × attackDamageScale × comboMult — i.e. what the
+// hit WOULD deal if the defender weren't blocking. The threshold check
+// uses raw damage so a strong UPPERCUT-with-combo always smashes through
+// even if the actual landed damage gets reduced.
+const BLOCK_BREAK_THRESHOLD = 20;
+
 function triggerHitNode(attacker, defender, baseDamage, attackType = "jab") {
+  // Pre-fight: ignore all damage. Players can flail during the intro march
+  // without affecting health or triggering knockdowns.
+  if (!gameStarted) return;
   if (isDodgeAction(defender.state.action)) {
     registerSuccessfulDodge(defender, attacker);
     return;
   }
-  let comboMultiplier;
-  if (defender.state.action === "block") {
-    comboMultiplier = 0.5;
-  } else {
-    comboMultiplier = getComboDamageMultiplier(attacker);
+  const comboMult = getComboDamageMultiplier(attacker);
+  const rawDamage = baseDamage * attacker.state.attackDamageScale * comboMult;
+  const isBlocking = defender.state.action === "block";
+  const breaksBlock = isBlocking && rawDamage > BLOCK_BREAK_THRESHOLD;
+
+  // While blocking AND the hit isn't a block-breaker → 50% reduction.
+  // Block-breaking hits land at full damage (and clear the block below).
+  const damage = (isBlocking && !breaksBlock)
+    ? baseDamage * attacker.state.attackDamageScale * 0.5
+    : rawDamage;
+
+  if (breaksBlock) {
+    // Forcibly drop the defender out of block. Mirrors the toggle that
+    // setAction(p, "block") performs when called on an already-blocking
+    // player (line ~1085), but we set it directly so the call doesn't
+    // depend on the toggle behavior.
+    defender.state.action = "idle";
+    defender.state.timer = 0;
+    // Tell the defender's phone so its local isBlockingLocal flag flips
+    // immediately (instead of waiting for the auto-end timer).
+    notifyPlayer(playerSlot(defender), "block_broken", {});
   }
 
-  const damage =
-    baseDamage * attacker.state.attackDamageScale * comboMultiplier;
+  // Haptic notifications. Both phones get a buzz on a successful hit —
+  // attacker for "you connected", defender for "you took it".
+  notifyPlayer(playerSlot(attacker), "hit_landed", { damage });
+  notifyPlayer(playerSlot(defender), "hit_taken",  { damage });
 
-  triggerHitConfirm(attacker, attacker.state.punchOffset);
+  triggerHitConfirm(attacker, attacker.state.punchOffset, damage);
   if (damage >= DAZED_DAMAGE_THRESHOLD) {
     triggerDazed(defender, damage);
   }
@@ -1371,7 +1899,12 @@ function triggerHitNode(attacker, defender, baseDamage, attackType = "jab") {
     defender.physics.camRotVel.x -= 30;
     triggerBlackout(defender, 1, 0);
     crowdInstance.setState("KNOCKOUT_REACTION");
-  } else {
+    // KO ends the round immediately — attacker wins regardless of HP math.
+    endRound('KO', playerSlot(attacker));
+  } else if (!defender.state.isKnockedOut) {
+    // Subsequent hits on a STILL-CONSCIOUS player flicker the blackout.
+    // Once a player is KO'd the full-opacity blackout from the KO branch
+    // above must not be reduced by later hits, so this branch is skipped.
     triggerBlackout(
       defender,
       0.05 + hitPower * 0.35,
@@ -1599,9 +2132,14 @@ function animate() {
   processActions(player1, player2, time, deltaTime);
   processActions(player2, player1, time, deltaTime);
 
+  // Override player positions while the intro is running. Runs AFTER the
+  // physics so it wins, BEFORE updateCameras() so cameras frame the march.
+  applyIntroMarch();
+
   ring.update(deltaTime);
   crowdInstance.update(deltaTime);
 
+  updateRoundTimer();
   updateCameras();
 
   // Render Split Screen
