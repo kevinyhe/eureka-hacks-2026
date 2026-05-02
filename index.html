@@ -232,7 +232,7 @@
       }
       .winner-banner.show { display: flex; }
       .winner-banner .text {
-        font-size: 96px; letter-spacing: 16px;
+        font-size: 108px;
         color: #fff;
         text-shadow: 0 0 36px rgba(255, 255, 255, 0.7), 0 6px 24px rgba(0, 0, 0, 0.9);
         animation: winner-pop 700ms cubic-bezier(0.2, 0.7, 0.2, 1) forwards;
@@ -254,6 +254,50 @@
         20%  { transform: scale(1.2)  rotate(2deg);  opacity: 1; }
         60%  { transform: scale(1.0)  rotate(0deg);  opacity: 1; }
         100% { transform: scale(1.05) rotate(0deg);  opacity: 1; }
+      }
+
+      /* ---- Camera-pan (KO cinematic) overlays ---------------------------------
+         When body.pan-active is on:
+           * The split-screen seam, HUD bars, round timer, connection pills,
+             and the half-screen winner banners are hidden.
+           * Two full-height side banners appear:
+               left  = WINNER
+               right = KO (or TIME for a time-out win — currently only KO panes,
+                           but the right-side text is data-driven so it works
+                           if we ever add time-out cinematics).
+      ----------------------------------------------------------------------- */
+      body.pan-active #info,
+      body.pan-active #divider,
+      body.pan-active #round-timer,
+      body.pan-active #conn-indicators,
+      body.pan-active .winner-banner { display: none !important; }
+      /* Clear both per-half blackout overlays so the loser's full-opacity
+         KO blackout doesn't cover half of the cinematic. */
+      body.pan-active .blackout-overlay { opacity: 0 !important; }
+
+      .pan-banner {
+        position: absolute; top: 0; bottom: 0; width: 50%;
+        display: none; align-items: center; justify-content: center;
+        z-index: 96; pointer-events: none;
+        font-family: sans-serif; font-weight: 900;
+        font-size: 72px;
+        color: #fff;
+        text-shadow: 0 0 48px rgba(255, 255, 255, 0.55), 0 6px 28px rgba(0, 0, 0, 0.9);
+      }
+      .pan-banner-left  { left: 0;   }
+      .pan-banner-right { left: 50%; }
+      body.pan-active .pan-banner {
+        display: flex;
+        animation: winner-pop 700ms cubic-bezier(0.2, 0.7, 0.2, 1) forwards;
+      }
+      /* Tint the banners by winning side so the player colours read at a glance. */
+      body.pan-active.winner-p1 .pan-banner {
+        color: #ffd2d2;
+        text-shadow: 0 0 48px rgba(255, 85, 85, 0.95), 0 6px 28px rgba(0, 0, 0, 0.9);
+      }
+      body.pan-active.winner-p2 .pan-banner {
+        color: #d2d2ff;
+        text-shadow: 0 0 48px rgba(85, 85, 255, 0.95), 0 6px 28px rgba(0, 0, 0, 0.9);
       }
       /* Countdown overlay (3 / 2 / 1 / FIGHT) */
       #countdown {
@@ -322,6 +366,8 @@
     <div id="winner-draw" class="winner-banner draw">
       <div class="text">DRAW</div>
     </div>
+    <div class="pan-banner pan-banner-left"  id="pan-banner-left">WINNER</div>
+    <div class="pan-banner pan-banner-right" id="pan-banner-right">KO</div>
     <script async src="https://unpkg.com/es-module-shims@1.8.0/dist/es-module-shims.js"></script>
     <script type="importmap">
       {

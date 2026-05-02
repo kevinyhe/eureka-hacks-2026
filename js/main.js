@@ -540,9 +540,18 @@ function getActionPose(
     const drive = pulse(progress, 0.58);
     const dip =
       Math.sin(clamp01(progress / 0.42) * Math.PI) * (1 - drive * 0.45);
+    // Curved-up arc, mirroring the hook's sideways arc but in Y. Glove
+    // travels from the loaded dip (Y≈0.72) to the apex (Y≈1.95) with a
+    // small lateral bump that crests at the midpoint of the rise.
+    const rise = easeInOut(clamp01((progress - 0.08) / 0.58));
+    const uppercutArc = new THREE.Vector3(
+      mix(0.45, 0.08, rise) + Math.sin(rise * Math.PI) * 0.22,
+      mix(0.72, 1.95, rise) + Math.sin(rise * Math.PI) * 0.18,
+      mix(0.12, 1.22, rise),
+    );
 
     pose.r.lerp(new THREE.Vector3(0.45, 0.72, 0.12), dip);
-    pose.r.lerp(ACTIONS.uppercut.r.clone().add(punchOffset), drive);
+    pose.r.lerp(uppercutArc.add(punchOffset), drive);
     pose.l.lerp(new THREE.Vector3(-0.18, 1.36, 0.62), 0.45 + drive * 0.3);
     pose.headOffset.set(0, -0.02 * dip, -0.01);
     pose.headRot.set(0.16 * dip - 0.1 * drive, 0.04 * drive, 0.05 * drive);
@@ -1034,6 +1043,9 @@ function endRound(reason, forcedWinner) {
   lastTickedSecond = null;
   const timerEl = document.getElementById('round-timer');
   if (timerEl) timerEl.classList.remove('danger');
+  // Pull the game-active class off the body so HP / stamina / combo bars
+  // fade out for KO, time-out, AND draw endings.
+  document.body.classList.remove('game-active');
   // Phones: clear no-block + tell their isBlockingLocal flags to drop.
   notifyPlayer('P1', 'no_block_phase', { active: false });
   notifyPlayer('P2', 'no_block_phase', { active: false });
@@ -1044,7 +1056,12 @@ function endRound(reason, forcedWinner) {
     else if (player2.state.health > player1.state.health) winner = 'P2';
     else                                                  winner = 'DRAW';
   }
-  showWinnerBanner(winner, reason);
+  // KO endings hand off to the pan cinematic — its own banners (left=WINNER,
+  // right=KO) replace the half-screen winner banner. For other endings
+  // (TIME, DRAW) the half-screen banner stays.
+  if (reason !== 'KO') {
+    showWinnerBanner(winner, reason);
+  }
 }
 
 function pulseCamerasOnce() {
@@ -1906,8 +1923,9 @@ function triggerHitNode(attacker, defender, baseDamage, attackType = "jab") {
     // Cinematic slow-mo on the knockout — eases time down to 0.1× and
     // back to 1× over KO_SLOW_DURATION_MS, peaking at the midpoint.
     triggerKOSlowMo();
-    // 3s later, swing the camera around the winner.
-    scheduleKOPan(attacker);
+    // 3s later, swing the camera around the winner; full-screen render
+    // takes over and the WINNER / KO banners fly in.
+    scheduleKOPan(attacker, 'KO');
     // KO ends the round immediately — attacker wins regardless of HP math.
     endRound('KO', playerSlot(attacker));
   } else if (!defender.state.isKnockedOut) {
@@ -1969,12 +1987,15 @@ function processActions(p, defender, time, deltaTime) {
   }
 
   if (!p.state.isKnockedOut && p.state.stamina < STAMINA_MAX) {
-    const staminaRegen =
+    let staminaRegen =
       activeAction === "idle"
         ? STAMINA_REGEN_IDLE
         : activeAction === "block"
           ? 5
           : STAMINA_REGEN_BUSY;
+    // Double regen during the last-15s no-block phase so players can
+    // throw freely once defense is disabled.
+    if (noBlockActive) staminaRegen *= 2;
     p.state.stamina = Math.min(
       STAMINA_MAX,
       p.state.stamina + staminaRegen * deltaTime,
@@ -2133,31 +2154,52 @@ let previousTime = 0;
 let scaledTime = 0;     // cumulative TIME-SCALED time, for systems that read elapsed seconds
 
 // ---- KO winner-orbit cinematic ----
-// 3 seconds after a knockout, the renderer ditches the split-screen view
-// and renders a single full-screen orbit camera around the winner. The
-// existing winner banner stays visible (it's a half-screen overlay; the
-// half it occupies signals the winning side).
-const KO_PAN_DELAY_MS    = 3000;     // delay after KO before the pan begins
-const KO_PAN_RADIUS      = 3.6;      // distance from winner (world units)
-const KO_PAN_HEIGHT      = 1.85;     // camera Y
-const KO_PAN_LOOK_HEIGHT = 1.05;     // y the camera aims at on the winner
-const KO_PAN_ANGULAR_SPEED = 0.45;   // rad/sec — full orbit ≈ 14s
-const koPanCamera = new THREE.PerspectiveCamera(50, 1, 0.1, 100);
+// At KO_PAN_DELAY_MS post-KO the renderer switches from split-screen to a
+// single full-screen orbit camera. There's no fade — the camera *eases*
+// out from where the winner's view-camera was at the moment of switch,
+// gradually reaching its orbit position over KO_PAN_EASE_MS. After that
+// it just orbits at KO_PAN_ANGULAR_SPEED.
+const KO_PAN_DELAY_MS      = 2000;
+const KO_PAN_EASE_MS       = 5000;   // ease-out from captured pos to orbit position
+const KO_PAN_RADIUS        = 3.6;
+const KO_PAN_HEIGHT        = 1.85;
+const KO_PAN_LOOK_HEIGHT   = 1.05;
+const KO_PAN_ANGULAR_SPEED = 0.35;   // rad/sec — full orbit ≈ 14 s
+// Width of the orbit-camera viewport during the seam-slide phase.
+// Starts at half-screen (left half = orbit camera, right half = camera2),
+// expands to full-screen over KO_PAN_SEAM_MS, then orbit-only.
+const KO_PAN_SEAM_MS = 1100;
+
+// Match camera1's FOV (60°) so the first frame of the pan looks identical
+// to what was being shown in camera1's left-half viewport.
+const koPanCamera = new THREE.PerspectiveCamera(60, 1, 0.1, 100);
 let koPanActive   = false;
 let koPanStartedAt = 0;
 let koPanWinner   = null;
 let koPanScheduledTimer = 0;
+const koPanStartCamPos = new THREE.Vector3();
+const koPanStartCamQuat = new THREE.Quaternion();
+// Reusable scratch object for computing target lookAt quaternions.
+const _koPanTempObj = new THREE.Object3D();
 
-// Schedule the pan to take over rendering after KO_PAN_DELAY_MS. Cancellable
-// from RESTART (in resetGameState) so it doesn't kick in during the next round.
-function scheduleKOPan(winnerPlayer) {
+// Schedule the pan to take over rendering after KO_PAN_DELAY_MS. Always
+// captures camera1 (P1's perspective) — by spec the pan begins on P1's
+// side of the screen regardless of who won.
+function scheduleKOPan(winnerPlayer, reasonText) {
   if (!winnerPlayer) return;
   if (koPanScheduledTimer) clearTimeout(koPanScheduledTimer);
+
   koPanScheduledTimer = setTimeout(() => {
     koPanScheduledTimer = 0;
     koPanWinner = winnerPlayer;
     koPanStartedAt = performance.now();
+    // Snapshot camera1's exact pose at the moment of switch. The orbit
+    // camera starts identical to camera1 (so the left half of the screen
+    // looks unchanged), then eases toward its orbit position+orientation.
+    koPanStartCamPos.copy(camera1.position);
+    koPanStartCamQuat.copy(camera1.quaternion);
     koPanActive = true;
+    enterPanLayout(playerSlot(winnerPlayer), reasonText || 'KO');
   }, KO_PAN_DELAY_MS);
 }
 
@@ -2165,6 +2207,24 @@ function cancelKOPan() {
   if (koPanScheduledTimer) { clearTimeout(koPanScheduledTimer); koPanScheduledTimer = 0; }
   koPanActive = false;
   koPanWinner = null;
+  exitPanLayout();
+}
+
+// Switch the page chrome to the pan-cinematic layout: hide split-screen UI,
+// show two big centered banners (WINNER on left, reason on right), and tint
+// them with the winning side's colour.
+function enterPanLayout(winnerSlot, reasonText) {
+  document.body.classList.remove('winner-p1', 'winner-p2');
+  if (winnerSlot === 'P1') document.body.classList.add('winner-p1');
+  else if (winnerSlot === 'P2') document.body.classList.add('winner-p2');
+  document.body.classList.add('pan-active');
+  const right = document.getElementById('pan-banner-right');
+  if (right) right.textContent = reasonText;
+  console.log('[ko-pan] entered layout — winner=', winnerSlot, 'reason=', reasonText);
+}
+
+function exitPanLayout() {
+  document.body.classList.remove('pan-active', 'winner-p1', 'winner-p2');
 }
 
 // ---- KO slow-mo time scale ----
@@ -2236,30 +2296,71 @@ function animate() {
   const halfW = Math.floor(w / 2);
 
   if (koPanActive && koPanWinner) {
-    // Full-screen orbit cinematic around the winner.
+    // Cinematic — starts split-screen with the orbit camera taking over
+    // the left half (matching camera1's pose exactly), then the seam
+    // slides right while the orbit camera eases toward its orbit pose.
     const winnerPos = koPanWinner.rootGroup.position;
-    const elapsedSec = (performance.now() - koPanStartedAt) / 1000;
+    const nowMs = performance.now();
+    const elapsedMs = nowMs - koPanStartedAt;
+    const elapsedSec = elapsedMs / 1000;
     const angle = elapsedSec * KO_PAN_ANGULAR_SPEED;
+
+    const targetX = winnerPos.x + Math.cos(angle) * KO_PAN_RADIUS;
+    const targetY = KO_PAN_HEIGHT;
+    const targetZ = winnerPos.z + Math.sin(angle) * KO_PAN_RADIUS;
+
+    // Ease pose: position lerp + quaternion slerp from the captured
+    // camera1 pose toward (orbitTarget, lookAt(winner)).
+    const easeT = Math.min(1, elapsedMs / KO_PAN_EASE_MS);
+    const t = easeOutCubic(easeT);
     koPanCamera.position.set(
-      winnerPos.x + Math.cos(angle) * KO_PAN_RADIUS,
-      KO_PAN_HEIGHT,
-      winnerPos.z + Math.sin(angle) * KO_PAN_RADIUS,
+      koPanStartCamPos.x + (targetX - koPanStartCamPos.x) * t,
+      koPanStartCamPos.y + (targetY - koPanStartCamPos.y) * t,
+      koPanStartCamPos.z + (targetZ - koPanStartCamPos.z) * t,
     );
-    koPanCamera.lookAt(winnerPos.x, KO_PAN_LOOK_HEIGHT, winnerPos.z);
+    // Build the orbit-target orientation by hand (lookAt at the target
+    // position) so we can slerp from camera1's start orientation toward it.
+    _koPanTempObj.position.set(targetX, targetY, targetZ);
+    _koPanTempObj.lookAt(winnerPos.x, KO_PAN_LOOK_HEIGHT, winnerPos.z);
+    koPanCamera.quaternion.copy(koPanStartCamQuat);
+    koPanCamera.quaternion.slerp(_koPanTempObj.quaternion, t);
+
+    // Seam slide: orbit-camera viewport width grows from halfW to w.
+    const seamT = Math.min(1, elapsedMs / KO_PAN_SEAM_MS);
+    const seamE = easeOutCubic(seamT);
+    const orbitW   = Math.floor(halfW + (w - halfW) * seamE);
+    const cam2W    = w - orbitW;
 
     // Both players visible at full size for the cinematic.
     setPlayerViewMode(player1, true);
     setPlayerViewMode(player2, true);
 
-    if (koPanCamera.aspect !== w / h) {
-      koPanCamera.aspect = w / h;
+    // Orbit camera aspect tracks its viewport.
+    const orbitAspect = orbitW / h;
+    if (Math.abs(koPanCamera.aspect - orbitAspect) > 0.001) {
+      koPanCamera.aspect = orbitAspect;
       koPanCamera.updateProjectionMatrix();
     }
-    renderer.setViewport(0, 0, w, h);
-    renderer.setScissor(0, 0, w, h);
+
+    // LEFT slice — orbit camera.
+    renderer.setViewport(0, 0, orbitW, h);
+    renderer.setScissor(0, 0, orbitW, h);
     renderer.setClearColor(0x87ceeb);
     renderer.clear();
     renderer.render(scene, koPanCamera);
+
+    // RIGHT slice — camera2 (loser's view), only while the seam hasn't
+    // fully reached the right edge.
+    if (cam2W > 0) {
+      renderer.setViewport(orbitW, 0, cam2W, h);
+      renderer.setScissor(orbitW, 0, cam2W, h);
+      renderer.setClearColor(0x87ceeb);
+      renderer.clear();
+      // Set view modes for camera2's perspective.
+      setPlayerViewMode(player2, true);
+      setPlayerViewMode(player1, false);
+      renderer.render(scene, camera2);
+    }
     return;
   }
 
