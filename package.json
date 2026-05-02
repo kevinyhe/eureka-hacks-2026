@@ -1,0 +1,25 @@
+{
+  "name": "wii-boxing-server",
+  "version": "0.1.0",
+  "description": "WebSocket relay server for a two-player Wii Boxing-style game.",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "start": "node server/index.js",
+    "dev": "node server/index.js | pino-pretty",
+    "fake": "node server/scripts/fakeClient.js"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "chalk": "5.3.0",
+    "express": "4.21.1",
+    "pino": "9.5.0",
+    "ws": "8.18.0",
+    "zod": "3.23.8"
+  },
+  "devDependencies": {
+    "pino-pretty": "11.3.0"
+  }
+}

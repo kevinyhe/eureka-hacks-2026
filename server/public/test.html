@@ -1,0 +1,254 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>Wii Boxing — Test Client</title>
+<style>
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; touch-action: manipulation; -webkit-user-select: none; user-select: none; }
+  html, body { margin: 0; padding: 0; min-height: 100vh; background: #111; color: #eee; font-family: -apple-system, system-ui, sans-serif; }
+  body { padding: 12px; padding-bottom: 24px; }
+  h1 { font-size: 18px; margin: 0 0 12px 0; }
+  .status { font-size: 13px; opacity: 0.75; margin-bottom: 8px; }
+  button {
+    display: block; width: 100%; padding: 16px; margin: 8px 0;
+    font-size: 18px; font-weight: 700; border: none; border-radius: 12px;
+    background: #333; color: #eee;
+  }
+  button:active { background: #555; }
+  .primary { background: #2a6 !important; color: #fff; }
+  .danger  { background: #a33 !important; color: #fff; }
+  .blockBtn { background: #248 !important; color: #fff; }
+  .row { display: flex; gap: 8px; }
+  .row > button { flex: 1; }
+  input {
+    width: 100%; padding: 12px; font-size: 18px; border-radius: 8px;
+    border: 1px solid #444; background: #222; color: #eee; margin: 8px 0;
+  }
+  .code {
+    font-size: 56px; font-weight: 800; text-align: center;
+    padding: 24px 0; letter-spacing: 12px; color: #2a6;
+  }
+  .log {
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 11px; background: #000; padding: 8px; border-radius: 8px;
+    margin-top: 12px; max-height: 220px; overflow-y: auto;
+    white-space: pre-wrap; word-break: break-all;
+  }
+  .log .sent { color: #6cf; }
+  .log .recv { color: #6f6; }
+  .log .err  { color: #f66; }
+  .hidden { display: none !important; }
+  .hint { font-size: 12px; opacity: 0.6; margin-top: 4px; }
+</style>
+</head>
+<body>
+
+<div id="landing">
+  <h1>Wii Boxing — Test Client</h1>
+  <button class="primary" onclick="startDisplay()">I am the Display</button>
+  <button onclick="show('join')">I am a Player</button>
+  <div class="hint">Open this URL on each phone (same Wi-Fi).</div>
+</div>
+
+<div id="display" class="hidden">
+  <h1>Display</h1>
+  <div class="status" id="dispStatus">connecting…</div>
+  <div class="code" id="roomCode">----</div>
+  <div class="hint">share this code with players</div>
+  <div class="log" id="dispLog"></div>
+</div>
+
+<div id="join" class="hidden">
+  <h1>Join a room</h1>
+  <input id="roomInput" type="text" inputmode="numeric" pattern="[0-9]*" placeholder="room code" maxlength="6">
+  <input id="nameInput" type="text" placeholder="display name (optional)" maxlength="32">
+  <button class="primary" onclick="joinRoom()">Join</button>
+  <button onclick="show('landing')">Back</button>
+</div>
+
+<div id="player" class="hidden">
+  <h1 id="playerTitle">Player</h1>
+  <div class="status" id="playerStatus">connecting…</div>
+  <div class="row">
+    <button onclick="action('punch_jab')">JAB</button>
+    <button onclick="action('punch_hook')">HOOK</button>
+    <button onclick="action('punch_uppercut')">UPPER</button>
+  </div>
+  <div class="row">
+    <button onclick="action('dodge_left')">◀ DODGE</button>
+    <button onclick="action('dodge_down')">▼ DUCK</button>
+    <button onclick="action('dodge_right')">DODGE ▶</button>
+  </div>
+  <button id="blockBtn" class="blockBtn">HOLD TO BLOCK</button>
+  <div class="log" id="playerLog"></div>
+</div>
+
+<script>
+  const wsUrl = (location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/ws';
+  const KEEPALIVE_MS = 10000;            // client-side app-ping cadence
+  const RECONNECT_BACKOFF_MS = [500, 1000, 2000, 4000, 8000];
+  let ws = null;
+  let currentLogId = null;
+  let keepaliveTimer = null;
+  let reconnectInfo = null;              // { kind: 'player', roomCode, name }
+  let reconnectAttempt = 0;
+
+  function show(id) {
+    for (const s of ['landing', 'display', 'join', 'player']) {
+      document.getElementById(s).classList.toggle('hidden', s !== id);
+    }
+    if (id === 'display') currentLogId = 'dispLog';
+    else if (id === 'player') currentLogId = 'playerLog';
+    else currentLogId = null;
+  }
+
+  function log(kind, text) {
+    if (!currentLogId) return;
+    const el = document.getElementById(currentLogId);
+    const div = document.createElement('div');
+    div.className = kind;
+    div.textContent = (kind === 'sent' ? '→ ' : kind === 'recv' ? '← ' : '! ') + text;
+    el.appendChild(div);
+    el.scrollTop = el.scrollHeight;
+    while (el.childNodes.length > 200) el.removeChild(el.firstChild);
+  }
+
+  function send(type, data) {
+    const msg = { type, data: data || {}, t: Date.now() };
+    ws.send(JSON.stringify(msg));
+    log('sent', JSON.stringify(msg));
+  }
+
+  function setStatus(id, text) {
+    const el = document.getElementById(id);
+    if (el) el.textContent = text;
+  }
+
+  function connectWs(onOpen) {
+    ws = new WebSocket(wsUrl);
+    ws.addEventListener('open', () => {
+      reconnectAttempt = 0;
+      setStatus('dispStatus', 'connected');
+      setStatus('playerStatus', 'connected');
+      startKeepalive();
+      onOpen && onOpen();
+    });
+    ws.addEventListener('message', (e) => {
+      log('recv', e.data);
+      let msg;
+      try { msg = JSON.parse(e.data); } catch { return; }
+      handleServerMessage(msg);
+    });
+    ws.addEventListener('close', (e) => {
+      stopKeepalive();
+      // Surface the close code so we can tell server-kill (1006 + watchdog
+      // log line) from client/network-side close (1001/1000/etc.).
+      log('err', 'disconnected code=' + e.code + ' reason="' + (e.reason || '') + '" wasClean=' + e.wasClean);
+      setStatus('dispStatus', 'disconnected (code ' + e.code + ')');
+      setStatus('playerStatus', 'disconnected (code ' + e.code + ')');
+      maybeReconnect();
+    });
+    ws.addEventListener('error', () => log('err', 'ws error'));
+  }
+
+  // Client-side periodic ping. Two reasons:
+  //   1. Forces JS event loop to do something every 10s, which a foregrounded
+  //      mobile browser will respect (background tabs may still throttle).
+  //   2. Keeps the server's per-conn `lastSeenAt` fresh end-to-end without
+  //      relying on protocol-level pongs alone.
+  function startKeepalive() {
+    stopKeepalive();
+    keepaliveTimer = setInterval(() => {
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        try { send('ping', {}); } catch (e) { /* ignore */ }
+      }
+    }, KEEPALIVE_MS);
+  }
+  function stopKeepalive() {
+    if (keepaliveTimer) { clearInterval(keepaliveTimer); keepaliveTimer = null; }
+  }
+
+  // Player-only auto-reconnect. Display reconnection would need to allocate
+  // a new room code (different code → confusing); skip it on purpose.
+  function maybeReconnect() {
+    if (!reconnectInfo || reconnectInfo.kind !== 'player') return;
+    if (reconnectAttempt >= RECONNECT_BACKOFF_MS.length) {
+      log('err', 'gave up reconnecting after ' + reconnectAttempt + ' tries — reload to retry');
+      return;
+    }
+    const delay = RECONNECT_BACKOFF_MS[reconnectAttempt++];
+    log('err', 'reconnecting in ' + delay + 'ms (attempt ' + reconnectAttempt + ')');
+    setStatus('playerStatus', 'reconnecting in ' + delay + 'ms…');
+    setTimeout(() => {
+      connectWs(() => {
+        const data = { roomCode: reconnectInfo.roomCode };
+        if (reconnectInfo.name) data.displayName = reconnectInfo.name;
+        send('player:join', data);
+      });
+    }, delay);
+  }
+
+  function handleServerMessage(msg) {
+    if (msg.type === 'room:created') {
+      document.getElementById('roomCode').textContent = msg.data.roomCode;
+    } else if (msg.type === 'room:joined') {
+      document.getElementById('playerTitle').textContent =
+        'Player ' + msg.data.playerId + ' — room ' + msg.data.roomCode;
+      setStatus('playerStatus', 'in match');
+    } else if (msg.type === 'error') {
+      log('err', msg.data.code + ': ' + msg.data.message);
+    }
+  }
+
+  function startDisplay() {
+    show('display');
+    connectWs(() => send('display:create_room'));
+  }
+
+  function joinRoom() {
+    const code = document.getElementById('roomInput').value.trim();
+    const name = document.getElementById('nameInput').value.trim();
+    if (!/^\d+$/.test(code)) { alert('room code must be numeric'); return; }
+    show('player');
+    reconnectInfo = { kind: 'player', roomCode: code, name };
+    connectWs(() => {
+      const data = { roomCode: code };
+      if (name) data.displayName = name;
+      send('player:join', data);
+    });
+  }
+
+  function action(name) {
+    send('player:action', { action: name, power: 1.0 });
+  }
+
+  // Block: hold-to-block via touch/mouse, with both events bound so it
+  // works on phones (touchstart/end) and dev laptops (mousedown/up).
+  let blocking = false;
+  function blockStart(e) {
+    if (e) e.preventDefault();
+    if (blocking) return;
+    blocking = true;
+    send('player:block_start');
+  }
+  function blockEnd(e) {
+    if (e) e.preventDefault();
+    if (!blocking) return;
+    blocking = false;
+    send('player:block_end');
+  }
+
+  window.addEventListener('DOMContentLoaded', () => {
+    const b = document.getElementById('blockBtn');
+    b.addEventListener('touchstart', blockStart, { passive: false });
+    b.addEventListener('touchend', blockEnd, { passive: false });
+    b.addEventListener('touchcancel', blockEnd, { passive: false });
+    b.addEventListener('mousedown', blockStart);
+    b.addEventListener('mouseup', blockEnd);
+    b.addEventListener('mouseleave', blockEnd);
+  });
+</script>
+</body>
+</html>
