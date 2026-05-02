@@ -5,6 +5,7 @@ import express from 'express';
 import { WebSocketServer } from 'ws';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const repoRoot = path.resolve(__dirname, '..');
 
 import { config } from './config.js';
 import { logger } from './utils/logger.js';
@@ -15,13 +16,12 @@ import { ErrorCode, ACTION_CLASS_TYPES } from './net/messages.js';
 import { RoomManager } from './rooms/roomManager.js';
 import { Heartbeat } from './net/heartbeat.js';
 
-// Eagerly import handler modules so they self-register their handlers.
-// (handlers.js itself registers `ping` at import time.)
+// handlers.js itself registers `ping` at import time
 import './net/handlers.js';
 import { handleConnectionClose } from './net/roomHandlers.js';
 import './net/actionHandlers.js';
 
-// ---------- crash safety ----------
+// crash safety
 process.on('uncaughtException', (err) => {
   logger.error({ err }, 'uncaughtException — staying alive');
 });
@@ -31,6 +31,18 @@ process.on('unhandledRejection', (err) => {
 
 // ---------- HTTP (debug + health + test page) ----------
 const app = express();
+
+app.use('/js', express.static(path.join(repoRoot, 'js')));
+app.use('/css', express.static(path.join(repoRoot, 'css')));
+app.use('/data', express.static(path.join(repoRoot, 'data')));
+
+app.get('/', (_req, res) => {
+  res.sendFile(path.join(repoRoot, 'index.html'));
+});
+
+app.get('/index.html', (_req, res) => {
+  res.sendFile(path.join(repoRoot, 'index.html'));
+});
 
 // Serve the browser test client at /test.html (and any other static assets).
 app.use(express.static(path.join(__dirname, 'public')));

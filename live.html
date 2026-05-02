@@ -270,15 +270,11 @@ function onOrientation(e) {
   raw.o.alpha = e.alpha; raw.o.beta = e.beta; raw.o.gamma = e.gamma;
 }
 
-// ============================================================
-// WEBSOCKET LAYER (game-time phone client)
-//
-// Protocol: PLAN.md / server/net/messages.js. Envelope is {type, data, t}.
+// server/net/messages.js. Envelope is {type, data, t}.
 // We open after permission grant, then send player:join with the 4-digit
 // roomCode. After that, every move the local classifier fires is mapped and
-// sent. WS errors are logged; the page never crashes — local detection still
+// sent. WS errors are logged; the page never crashes local detection still
 // runs without the server.
-// ============================================================
 const params = new URLSearchParams(location.search);
 const WS_URL = params.get('server') ||
   ((location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/ws');

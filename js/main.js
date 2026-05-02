@@ -1,6 +1,7 @@
 import * as THREE from "three";
 import { Ring } from "./ring.js";
 import { Crowd } from "./crowd.js";
+import { Network } from "./network.js";
 
 // Spring integration function for procedural ragdoll + bodycam physics
 function updateSpring(pos, vel, target, tension, friction, dt) {
@@ -329,9 +330,9 @@ const ACTIONS = {
     staminaCost: 50,
   },
   block: {
-    duration: 0.22,
-    l: new THREE.Vector3(-0.18, 1.38, 3.58),
-    r: new THREE.Vector3(0.18, 1.38, 3.58),
+    duration: 0.5,
+    l: new THREE.Vector3(-0.26, 1.78, 0.52),
+    r: new THREE.Vector3(0.26, 1.78, 0.52),
     damage: 0,
     staminaCost: 25,
   },
@@ -552,13 +553,13 @@ function getActionPose(
   }
 
   if (action === "block") {
-    const cover = pulse(progress, 0.5);
+    const cover = progress >= 0.98 ? 1 : pulse(progress, 0.5);
     pose.l.lerp(ACTIONS.block.l, cover);
     pose.r.lerp(ACTIONS.block.r, cover);
-    pose.headOffset.set(0, -0.025 * cover, -0.01 * cover);
-    pose.headRot.set(0.13 * cover, 0, 0);
-    pose.avatarOffset.set(0, -0.03 * cover, -0.02 * cover);
-    pose.bodyRot.set(0.08 * cover, 0, 0);
+    pose.headOffset.set(0, 0.01 * cover, -0.01 * cover);
+    pose.headRot.set(0.05 * cover, 0, 0);
+    pose.avatarOffset.set(0, 0, 0);
+    pose.bodyRot.set(0.02 * cover, 0, 0);
     return pose;
   }
 
@@ -818,42 +819,298 @@ function updateCameras() {
 // ------------------------------------------------------------
 const isDodgeAction = (action) => action === "dodge" || action === "backDodge";
 
-window.addEventListener("keydown", (e) => {
-  const setAction = (p, action) => {
-    // Allow overriding idle, or interrupting if we want
-    if (
-      (p.state.action === "idle" || p.state.action === "block") &&
-      !p.state.isKnockedOut
-    ) {
-      if (action === "block" && p.state.action === "block") {
-        // If we are already blocking, release the block
-        p.state.action = "idle";
-        p.state.timer = 0;
+const setAction = (p, action) => {
+  // Allow overriding idle, or interrupting if we want
+  if (
+    (p.state.action === "idle" || p.state.action === "block") &&
+    !p.state.isKnockedOut
+  ) {
+    if (action === "block" && p.state.action === "block") {
+      // If we are already blocking, release the block
+      p.state.action = "idle";
+      p.state.timer = 0;
+      return;
+    }
+    const act = ACTIONS[action];
+    const staminaCost = act.staminaCost || 0;
+    const staminaAfterCost = THREE.MathUtils.clamp(
+      p.state.stamina - staminaCost,
+      0,
+      STAMINA_MAX,
+    );
+    const durationScale =
+      act.damage > 0 ? getStaminaDurationScale(staminaAfterCost) : 1;
+
+    if (action === "dodge") p.state.dodgeSide *= -1;
+    p.state.action = action;
+    p.state.actionDuration = act.duration * durationScale;
+    p.state.timer = p.state.actionDuration;
+    p.state.hitLanded = false; // reset hit flag
+    p.state.punchOffset = getRandomPunchOffset(action);
+    p.state.attackDamageScale =
+      act.damage > 0 ? getStaminaDamageScale(staminaAfterCost) : 1;
+    p.state.stamina = staminaAfterCost;
+    updateStaminaUi(p);
+  }
+};
+
+const NETWORK_ACTION_MAP = {
+  jab: "jab",
+  punch_jab: "jab",
+  hook: "hook",
+  punch_hook: "hook",
+  uppercut: "uppercut",
+  punch_uppercut: "uppercut",
+  dodge_left: "dodge_left",
+  dodge_right: "dodge_right",
+  dodge_down: "backDodge",
+  dodge_back: "backDodge",
+  backdodge: "backDodge",
+  back_dodge: "backDodge",
+  block: "block",
+  block_start: "block_start",
+  block_end: "block_end",
+};
+
+const NETWORK_PLAYER_MAP = {
+  p1: player1,
+  p2: player2,
+};
+
+const networkParams = new URLSearchParams(window.location.search);
+const networkServerIp =
+  networkParams.get("serverIp") || networkParams.get("server");
+const networkP1Id = networkParams.get("p1");
+const networkP2Id = networkParams.get("p2");
+const serverRelayEnabled = networkParams.get("serverRelay") !== "0";
+const serverWsUrl =
+  networkParams.get("ws") ||
+  `${window.location.protocol === "https:" ? "wss" : "ws"}://${window.location.host}/ws`;
+const debugLiveEnabled = networkParams.get("debugLive") !== "0";
+const ACTIVE_ROOM_STORAGE_KEY = "wiiBoxing.activeRoomCode";
+
+let currentRoomCode = null;
+let liveDebugWindow = null;
+const networkSenderToPlayer = new Map();
+
+function resolveSlotPlayer(slot) {
+  const normalized = String(slot || "")
+    .trim()
+    .toLowerCase();
+  if (["p1", "player1", "1", "red", "left"].includes(normalized)) {
+    return player1;
+  }
+  if (["p2", "player2", "2", "blue", "right"].includes(normalized)) {
+    return player2;
+  }
+  return null;
+}
+
+function resolveNetworkPlayer(id, data) {
+  const slotPlayer =
+    resolveSlotPlayer(data?.playerId) ||
+    resolveSlotPlayer(data?.player) ||
+    resolveSlotPlayer(data?.side);
+  if (slotPlayer) return slotPlayer;
+
+  if (networkP1Id && id === networkP1Id) return player1;
+  if (networkP2Id && id === networkP2Id) return player2;
+
+  if (!id) return null;
+
+  if (networkSenderToPlayer.has(id)) {
+    return networkSenderToPlayer.get(id);
+  }
+
+  const claimedPlayers = new Set(networkSenderToPlayer.values());
+  if (!claimedPlayers.has(player1)) {
+    networkSenderToPlayer.set(id, player1);
+    return player1;
+  }
+  if (!claimedPlayers.has(player2)) {
+    networkSenderToPlayer.set(id, player2);
+    return player2;
+  }
+
+  return null;
+}
+
+function normalizeNetworkAction(data) {
+  const rawAction = String(
+    data?.action || data?.move || data?.type || "",
+  ).toLowerCase();
+  if (!rawAction) return null;
+  return NETWORK_ACTION_MAP[rawAction] || null;
+}
+
+function applyNetworkAction(player, normalizedAction) {
+  if (!player || !normalizedAction) return;
+
+  if (normalizedAction === "dodge_left") {
+    player.state.dodgeSide = -1;
+    setAction(player, "dodge");
+    return;
+  }
+
+  if (normalizedAction === "dodge_right") {
+    player.state.dodgeSide = 1;
+    setAction(player, "dodge");
+    return;
+  }
+
+  if (normalizedAction === "block_start") {
+    if (player.state.action !== "block") setAction(player, "block");
+    return;
+  }
+
+  if (normalizedAction === "block_end") {
+    if (player.state.action === "block") setAction(player, "block");
+    return;
+  }
+
+  if (normalizedAction === "block") {
+    if (player.state.action !== "block") setAction(player, "block");
+    return;
+  }
+
+  if (normalizedAction === "backDodge") {
+    setAction(player, "backDodge");
+    return;
+  }
+
+  setAction(player, normalizedAction);
+}
+
+function buildLiveDebugUrl(roomCode) {
+  const url = new URL("/test.html", window.location.origin);
+  if (roomCode) url.searchParams.set("room", roomCode);
+  return url.toString();
+}
+
+function openLiveDebugSide(roomCode) {
+  const url = buildLiveDebugUrl(roomCode);
+  const features =
+    "popup=yes,width=420,height=900,left=0,top=0,resizable=yes,scrollbars=yes";
+
+  if (liveDebugWindow && !liveDebugWindow.closed) {
+    liveDebugWindow.location.href = url;
+    liveDebugWindow.focus();
+    return;
+  }
+
+  liveDebugWindow = window.open(url, "live-debug", features);
+}
+
+function ensureLiveDebugButton() {
+  if (!debugLiveEnabled) return;
+  if (document.getElementById("open-live-debug")) return;
+
+  const button = document.createElement("button");
+  button.id = "open-live-debug";
+  button.type = "button";
+  button.textContent = "Open Live Debug";
+  Object.assign(button.style, {
+    position: "fixed",
+    top: "12px",
+    right: "12px",
+    zIndex: "120",
+    padding: "10px 14px",
+    border: "none",
+    borderRadius: "8px",
+    background: "rgba(0, 0, 0, 0.7)",
+    color: "#fff",
+    fontWeight: "700",
+    cursor: "pointer",
+  });
+  button.addEventListener("click", () => openLiveDebugSide(currentRoomCode));
+  document.body.appendChild(button);
+}
+
+function connectRendererToServerRelay() {
+  ensureLiveDebugButton();
+
+  const connect = () => {
+    const ws = new WebSocket(serverWsUrl);
+
+    ws.addEventListener("open", () => {
+      ws.send(
+        JSON.stringify({
+          type: "display:create_room",
+          data: {},
+          t: Date.now(),
+        }),
+      );
+    });
+
+    ws.addEventListener("message", (event) => {
+      let message;
+      try {
+        message = JSON.parse(event.data);
+      } catch {
         return;
       }
-      const act = ACTIONS[action];
-      const staminaCost = act.staminaCost || 0;
-      const staminaAfterCost = THREE.MathUtils.clamp(
-        p.state.stamina - staminaCost,
-        0,
-        STAMINA_MAX,
-      );
-      const durationScale =
-        act.damage > 0 ? getStaminaDurationScale(staminaAfterCost) : 1;
 
-      if (action === "dodge") p.state.dodgeSide *= -1;
-      p.state.action = action;
-      p.state.actionDuration = act.duration * durationScale;
-      p.state.timer = p.state.actionDuration;
-      p.state.hitLanded = false; // reset hit flag
-      p.state.punchOffset = getRandomPunchOffset(action);
-      p.state.attackDamageScale =
-        act.damage > 0 ? getStaminaDamageScale(staminaAfterCost) : 1;
-      p.state.stamina = staminaAfterCost;
-      updateStaminaUi(p);
-    }
+      if (message?.type === "room:created") {
+        currentRoomCode = message?.data?.roomCode || null;
+        if (currentRoomCode) {
+          try {
+            window.localStorage.setItem(
+              ACTIVE_ROOM_STORAGE_KEY,
+              currentRoomCode,
+            );
+          } catch {
+            // Storage might be blocked in hardened browser modes.
+          }
+        }
+
+        if (liveDebugWindow && !liveDebugWindow.closed) {
+          liveDebugWindow.postMessage(
+            { type: "renderer:roomCode", roomCode: currentRoomCode },
+            window.location.origin,
+          );
+        }
+        return;
+      }
+
+      if (message?.type !== "player:action_relay") return;
+
+      const player = resolveNetworkPlayer(null, message.data);
+      const normalizedAction = normalizeNetworkAction(message.data);
+      applyNetworkAction(player, normalizedAction);
+    });
+
+    ws.addEventListener("close", () => {
+      setTimeout(connect, 1500);
+    });
+
+    ws.addEventListener("error", () => {
+      // reconnect is handled by the close callback
+    });
   };
 
+  connect();
+}
+
+if (serverRelayEnabled) {
+  connectRendererToServerRelay();
+}
+
+if (networkServerIp) {
+  Network.onData = (id, data) => {
+    const player = resolveNetworkPlayer(id, data);
+    const normalizedAction = normalizeNetworkAction(data);
+    applyNetworkAction(player, normalizedAction);
+  };
+
+  try {
+    Network.init(networkServerIp);
+    console.info("[network] connected to", networkServerIp);
+  } catch (error) {
+    console.error("[network] failed to initialize", error);
+  }
+}
+
+window.addEventListener("keydown", (e) => {
   switch (e.key.toLowerCase()) {
     // Player 1 controls
     case "q":
@@ -1022,11 +1279,11 @@ function triggerHitNode(attacker, defender, baseDamage, attackType = "jab") {
     registerSuccessfulDodge(defender, attacker);
     return;
   }
-    let comboMultiplier;
+  let comboMultiplier;
   if (defender.state.action === "block") {
-     comboMultiplier = 0.5;
+    comboMultiplier = 0.5;
   } else {
-     comboMultiplier = getComboDamageMultiplier(attacker);
+    comboMultiplier = getComboDamageMultiplier(attacker);
   }
 
   const damage =
@@ -1072,7 +1329,7 @@ function triggerHitNode(attacker, defender, baseDamage, attackType = "jab") {
   } else if (attackType === "uppercut") {
     camImpulseY = -13.0 * hitPower;
     camImpulseX = (Math.random() - 0.5) * 12.0 * hitPower;
-    spineImpulseY = (Math.random() - 0.5) -15.0 * hitPower;
+    spineImpulseY = Math.random() - 0.5 - 15.0 * hitPower;
     spineImpulseX = -12.4 * hitPower; // Bend backwards heavily
     camImpulseZ = 8 * hitPower;
   }
@@ -1310,7 +1567,10 @@ function processActions(p, defender, time, deltaTime) {
     p.physics.headRot.z,
   );
   p.avatarGroup.position.copy(p.physics.avatarOffset);
-  if (activeAction === "idle" && !p.state.isKnockedOut) {
+  if (
+    (activeAction === "idle" || activeAction === "block") &&
+    !p.state.isKnockedOut
+  ) {
     p.avatarGroup.position.y += Math.sin(time * 10) * 0.06;
   }
 

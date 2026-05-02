@@ -299,8 +299,8 @@ const ACTION_MAP = {
 // Held moves: server protocol only has block_start/end, no separate heal
 // events. Per task brief: send block_start/end for both. Documented in
 // the summary as a known protocol gap.
-const HELD_MOVES = new Set(['BLOCK', 'HEAL']);
-const BLOCK_END_DELAY_MS = 600;   // synthesize hold-release after a single-fire BLOCK trigger
+const HELD_MOVES = new Set(['BLOCK']);
+const BLOCK_END_DELAY_MS = 12000;   // synthesize hold-release after a single-fire BLOCK trigger
 
 let ws = null;
 let wsRoomCode = '';
@@ -526,8 +526,8 @@ function setMag(id, x, y, z) {
 //
 // All accelerations are `acceleration` (no gravity, device frame).
 const CLASSIFIER_THRESHOLD = 15;
-const BETA_DODGE_LO = 50;       // 90 ± 30
-const BETA_DODGE_HI = 130;
+const BETA_DODGE_LO = 60;       // 90 ± 30
+const BETA_DODGE_HI = 120;
 const GAMMA_RATE_BACKDODGE = -100;   // °/s;
 const BETA_X_LO = 60;           // JAB / DODGE_BACK only when β ∈ [60, 120]
 const BETA_X_HI = 120;
@@ -537,7 +537,9 @@ function classify() {
   // BLOCK: large positive β rotation rate (independent of acceleration).
   
   const betaRate = raw.r.beta;
-  if (typeof betaRate === 'number' && betaRate > BETA_RATE_BLOCK) {
+      const beta = raw.o.beta;
+
+  if (typeof betaRate === 'number' && betaRate > BETA_RATE_BLOCK && beta >= BETA_DODGE_LO && beta <= BETA_DODGE_HI) {
     return { move: 'BLOCK', axis: 'β̇', value: betaRate };
   }
   const x = raw.a.x, y = raw.a.y, z = raw.a.z;
@@ -553,6 +555,10 @@ function classify() {
       const move = z <= 0 ? 'DODGE_LEFT' : 'DODGE_RIGHT';
       return { move, axis: 'aZ', value: z, extra: 'β=' + beta.toFixed(0) + '°' };
     }
+    if (ay > CLASSIFIER_THRESHOLD) {
+      // this works better for some reason
+      return { move: 'HOOK', axis: 'aY', value: y };
+    }
     return { move: 'UPPERCUT', axis: 'aZ', value: z, extra: (typeof beta === 'number' ? 'β=' + beta.toFixed(0) + '°' : '') };
   }
 
@@ -567,7 +573,9 @@ function classify() {
     }
     return null;   // aX < 0 without large negative γ̇ — unclassified
   }
-  return { move: 'HOOK', axis: 'aY', value: y };
+  if (peak === ay) {
+    return { move: 'HOOK', axis: 'aY', value: y };
+  }
 }
 
 const detEl = document.getElementById('detected');
