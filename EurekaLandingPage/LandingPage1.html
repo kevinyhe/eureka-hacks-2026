@@ -50,17 +50,17 @@
         }
 
         .logo-image {
-            width: 100px;
+            width: 80px;
             /* Adjust size as needed */
-            height: 60px;
-            margin-right: 25px;
+            height: 48px;
+            margin-right: 15px;
             /*border-radius: 50%;   Optional: makes it circular */
         }
 
         .logo-image-text {
-            width: 500px;
+            width: 400px;
             /* Adjust size as needed */
-            height: 60px;
+            height: 48px;
             margin-right: 25px;
             /*border-radius: 50%;   Optional: makes it circular */
         }
@@ -94,12 +94,12 @@
         }
 
         nav {
-            max-width: 1200px;
-            margin: 0 auto;
-            padding: 0 20px;
+            width: 100%;
+            padding: 0 40px;
             display: flex;
-            justify-content: space-between;
+            justify-content: flex-start;
             align-items: center;
+            gap: 40px;
         }
 
         .logo {
@@ -469,6 +469,188 @@
             font-family: Arial, sans-serif;
             font-weight: normal;
         }
+
+        /* Leaderboard Styles */
+        .leaderboard-container {
+            display: flex;
+            gap: 0;
+            height: 700px;
+            margin-top: 20px;
+            background: rgba(15, 15, 15, 0.95);
+            border: 2px solid #333;
+            border-radius: 15px;
+            overflow: hidden;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.8);
+        }
+
+        .leaderboard-sidebar {
+            width: 320px;
+            background: rgba(10, 10, 10, 0.9);
+            border-right: 1px solid #333;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .sidebar-header {
+            padding: 15px 20px;
+            border-bottom: 1px solid #333;
+            font-size: 14px;
+            color: #888;
+            text-transform: uppercase;
+            display: flex;
+            justify-content: space-between;
+        }
+
+        .player-list {
+            overflow-y: auto;
+            flex: 1;
+        }
+
+        .player-row {
+            display: flex;
+            align-items: center;
+            padding: 12px 20px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+            cursor: pointer;
+            transition: background 0.2s;
+            font-family: 'Arial', sans-serif;
+            font-size: 14px;
+        }
+
+        .player-row:hover {
+            background: rgba(255, 255, 255, 0.05);
+        }
+
+        .player-row.active {
+            background: rgba(255, 255, 255, 0.1);
+            border-left: 3px solid #ff3333;
+        }
+
+        .player-rank {
+            width: 30px;
+            color: #888;
+            font-weight: bold;
+        }
+
+        .player-flag {
+            margin-right: 10px;
+        }
+
+        .player-name {
+            flex: 1;
+            color: #ccc;
+        }
+
+        .player-row.active .player-name {
+            color: #fff;
+            font-weight: bold;
+        }
+
+        .player-elo {
+            color: #888;
+            font-weight: bold;
+        }
+
+        .leaderboard-main {
+            flex: 1;
+            padding: 40px;
+            display: flex;
+            flex-direction: column;
+            overflow-y: auto;
+            background: rgba(20, 20, 20, 0.9);
+        }
+
+        .profile-header {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            margin-bottom: 30px;
+        }
+
+        .profile-top {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+        }
+
+        .profile-rank {
+            font-size: 28px;
+            color: #888;
+            font-weight: bold;
+        }
+
+        .profile-name {
+            font-size: 32px;
+            color: #fff;
+            font-weight: bold;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .profile-tier {
+            background: linear-gradient(135deg, #a020f0, #ff3333);
+            padding: 5px 10px;
+            border-radius: 5px;
+            font-size: 14px;
+            font-weight: bold;
+            text-transform: uppercase;
+            color: white;
+        }
+
+        .profile-stats {
+            display: flex;
+            gap: 20px;
+            font-size: 14px;
+            color: #aaa;
+            margin-top: 10px;
+        }
+
+        .profile-stats strong {
+            color: #fff;
+        }
+
+        .matches-section h3 {
+            font-size: 16px;
+            color: #888;
+            text-transform: uppercase;
+            margin-bottom: 15px;
+            padding-bottom: 10px;
+            border-bottom: 1px solid #333;
+        }
+
+        .match-row {
+            display: flex;
+            align-items: center;
+            padding: 12px 0;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+            font-family: 'Arial', sans-serif;
+            font-size: 14px;
+        }
+
+        .match-opponent {
+            flex: 1;
+            color: #ddd;
+        }
+
+        .match-result {
+            width: 100px;
+            font-weight: bold;
+        }
+
+        .match-result.won {
+            color: #4CAF50;
+        }
+
+        .match-result.lost {
+            color: #F44336;
+        }
+
+        .match-time {
+            width: 100px;
+            color: #888;
+            text-align: right;
+        }
     </style>
 </head>
 
@@ -482,6 +664,8 @@
             <ul class="nav-links">
                 <li><a onclick="showPage('home')">Home</a></li>
                 <li><a onclick="showPage('how-to-play')">How to Play</a></li>
+                <li><a onclick="showPage('leaderboard')">Leaderboard</a></li>
+                <li><a onclick="showPage('store')">Store</a></li>
             </ul>
         </nav>
     </header>
@@ -603,6 +787,147 @@
                         </li>
                     </ul>
                 </div>
+            </div>
+        </div>
+
+        <!-- Leaderboard Page -->
+        <div id="leaderboard" class="page">
+            <h2 style="text-align: center; margin-bottom: 20px; color: #ff3333;">Global Leaderboard</h2>
+            
+            <div class="leaderboard-container">
+                <!-- Sidebar -->
+                <div class="leaderboard-sidebar">
+                    <div class="sidebar-header">
+                        <span>Rank & Player</span>
+                        <span>Rating</span>
+                    </div>
+                    <div class="player-list">
+                        <div class="player-row active">
+                            <span class="player-rank">1</span>
+                            <span class="player-flag">🇬🇧</span>
+                            <span class="player-name">edcr</span>
+                            <span class="player-elo">2016</span>
+                        </div>
+                        <div class="player-row">
+                            <span class="player-rank">2</span>
+                            <span class="player-flag">🇺🇸</span>
+                            <span class="player-name">Feinberg</span>
+                            <span class="player-elo">1910</span>
+                        </div>
+                        <div class="player-row">
+                            <span class="player-rank">3</span>
+                            <span class="player-flag">🇨🇦</span>
+                            <span class="player-name">lowk3y_</span>
+                            <span class="player-elo">1907</span>
+                        </div>
+                        <div class="player-row">
+                            <span class="player-rank">4</span>
+                            <span class="player-flag">🇺🇸</span>
+                            <span class="player-name">Infume</span>
+                            <span class="player-elo">1882</span>
+                        </div>
+                        <div class="player-row">
+                            <span class="player-rank">5</span>
+                            <span class="player-flag">🇳🇱</span>
+                            <span class="player-name">HDMICables</span>
+                            <span class="player-elo">1837</span>
+                        </div>
+                        <div class="player-row">
+                            <span class="player-rank">6</span>
+                            <span class="player-flag">🇵🇱</span>
+                            <span class="player-name">Watermelon1708</span>
+                            <span class="player-elo">1822</span>
+                        </div>
+                        <div class="player-row">
+                            <span class="player-rank">7</span>
+                            <span class="player-flag">🇬🇧</span>
+                            <span class="player-name">BeefSalad</span>
+                            <span class="player-elo">1818</span>
+                        </div>
+                        <div class="player-row">
+                            <span class="player-rank">8</span>
+                            <span class="player-flag">🇨🇦</span>
+                            <span class="player-name">BadGamer</span>
+                            <span class="player-elo">1789</span>
+                        </div>
+                        <div class="player-row">
+                            <span class="player-rank">9</span>
+                            <span class="player-flag">🇺🇸</span>
+                            <span class="player-name">nEmerald</span>
+                            <span class="player-elo">1784</span>
+                        </div>
+                        <div class="player-row">
+                            <span class="player-rank">10</span>
+                            <span class="player-flag">🇺🇸</span>
+                            <span class="player-name">nahhann</span>
+                            <span class="player-elo">1777</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Main Profile Area -->
+                <div class="leaderboard-main">
+                    <div class="profile-header">
+                        <div class="profile-top">
+                            <span class="profile-rank">#1</span>
+                            <span class="player-flag" style="font-size: 24px;">🇬🇧</span>
+                            <span class="profile-name">edcr <span class="profile-tier">🥊 Undisputed (2016 elo)</span></span>
+                        </div>
+                        <div class="profile-stats">
+                            <span><strong>86%</strong> winrate</span> •
+                            <span><strong>2,912</strong> wins</span> •
+                            <span><strong>2,457</strong> KOs</span> •
+                            <span><strong>13</strong> best winstreak</span>
+                        </div>
+                    </div>
+
+                    <div class="matches-section">
+                        <h3>Recent Matches</h3>
+                        <div class="match-row">
+                            <span class="match-opponent">vorbh</span>
+                            <span class="match-result won">WON</span>
+                            <span class="match-time">1st Round KO</span>
+                        </div>
+                        <div class="match-row">
+                            <span class="match-opponent">Aquacorde</span>
+                            <span class="match-result won">WON</span>
+                            <span class="match-time">Decision</span>
+                        </div>
+                        <div class="match-row">
+                            <span class="match-opponent">BeefSalad</span>
+                            <span class="match-result won">WON</span>
+                            <span class="match-time">2nd Round KO</span>
+                        </div>
+                        <div class="match-row">
+                            <span class="match-opponent">romuxii</span>
+                            <span class="match-result won">WON</span>
+                            <span class="match-time">Decision</span>
+                        </div>
+                        <div class="match-row">
+                            <span class="match-opponent">bing_pigs</span>
+                            <span class="match-result won">WON</span>
+                            <span class="match-time">Decision</span>
+                        </div>
+                        <div class="match-row">
+                            <span class="match-opponent">lowk3y_</span>
+                            <span class="match-result lost">LOST</span>
+                            <span class="match-time">Decision</span>
+                        </div>
+                        <div class="match-row">
+                            <span class="match-opponent">Ranik_</span>
+                            <span class="match-result won">WON</span>
+                            <span class="match-time">3rd Round KO</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Store Page -->
+        <div id="store" class="page">
+            <div class="hero">
+                <h2>Store</h2>
+                <p class="subtitle">Customize your fighter. Items arriving soon!</p>
             </div>
         </div>
     </main>
