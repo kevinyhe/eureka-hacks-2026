@@ -33,10 +33,9 @@ session**. Order:
 1. `JAB`
 2. `HOOK_RIGHT` (right hook only — no left hook in this game)
 3. `UPPERCUT`
-4. `HEAL`
-5. `BLOCK_JAB`
-6. `DODGE_SIDE`
-7. `DODGE_BACK`
+4. `BLOCK`
+5. `DODGE_SIDE`
+6. `DODGE_BACK`
 
 For each sample: instruction screen → tap **START** → perform the motion →
 tap **STOP** → confirm with **KEEP**, **RETRY** (re-record), or **SKIP**
