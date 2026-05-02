@@ -65,6 +65,33 @@ registerHandler(MessageType.PLAYER_JOIN, ({ conn, data, rooms }) => {
   );
 });
 
+// -------- display:notify --------
+// Display-side game logic addresses an event to a specific player slot.
+// Server forwards it as `player:event` to that slot's phone (and only that
+// phone). Used for hit-landed / hit-taken haptics, block-broken, no-block
+// phase notifications, etc.
+registerHandler(MessageType.DISPLAY_NOTIFY, ({ conn, data, rooms }) => {
+  if (conn.role !== 'display') {
+    conn.sendError(ErrorCode.INVALID_STATE, 'display:notify only available to display connections');
+    return;
+  }
+  if (!conn.roomCode) {
+    conn.sendError(ErrorCode.NOT_IN_ROOM, 'display has no room');
+    return;
+  }
+  const room = rooms.getRoom(conn.roomCode);
+  if (!room) {
+    conn.sendError(ErrorCode.ROOM_NOT_FOUND, 'room missing');
+    return;
+  }
+  const slot = room.players[data.targetSlot];
+  if (!slot || !slot.connection) return;   // target phone not currently connected — silently drop
+  slot.connection.send(MessageType.PLAYER_EVENT, {
+    event: data.event,
+    data: data.data || {},
+  });
+});
+
 /**
  * Called from the ws close path. Marks the slot disconnected and broadcasts
  * status to remaining members.

@@ -3,33 +3,336 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Wii Boxing Emulator</title>
+    <title>boxxing</title>
     <style>
       body { margin: 0; overflow: hidden; background-color: #000; font-family: sans-serif; }
-      #info { position: absolute; top: 20px; width: 100%; display: flex; justify-content: space-around; color: white; font-weight: bold; text-transform: uppercase; font-size: 24px; text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.8); z-index: 100; pointer-events: none; }
+      #info {
+        position: absolute; top: 20px; width: 100%;
+        display: flex; justify-content: space-around;
+        color: white; font-weight: bold; text-transform: uppercase;
+        font-size: 24px; text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.8);
+        z-index: 100; pointer-events: none;
+        opacity: 0; transition: opacity 400ms ease;
+      }
+      body.game-active #info { opacity: 1; }
       .hud-p1 { color: #ff5555; text-align: center; }
       .hud-p2 { color: #5555ff; text-align: center; }
       .bar-container { width: 200px; background-color: #333; border: 2px solid white; margin-top: 6px; overflow: hidden; }
-      .health-bar-container { height: 20px; margin-top: 10px; }
+      .health-bar-container { height: 12px; margin-top: 8px; }
       .health-bar { height: 100%; width: 100%; background-color: #00ff00; transition: width 0.2s ease-out; }
-      .stamina-bar-container, .combo-bar-container { height: 10px; }
+      .stamina-bar-container, .combo-bar-container { height: 6px; }
       .stamina-bar { height: 100%; width: 100%; background-color: #ffd43b; transition: width 0.16s ease-out; }
       .combo-bar { height: 100%; width: 0%; background-color: #ff66cc; transition: width 0.16s ease-out; }
-      #divider { position: absolute; left: 50%; top: 0; bottom: 0; width: 4px; background-color: #fff; transform: translateX(-50%); z-index: 50; }
+      /* Split-screen seam — invisible. Just a thin backdrop blur strip
+         that smooths the pixel boundary between the two camera viewports;
+         no color, no border, no glow. */
+      #divider {
+        position: absolute; left: 50%; top: 0; bottom: 0;
+        width: 10px;
+        transform: translateX(-50%);
+        z-index: 50;
+        pointer-events: none;
+        background: transparent;
+        backdrop-filter: blur(2px);
+        -webkit-backdrop-filter: blur(2px);
+      }
       .hit-flash { position: absolute; top: 0; left: 0; right: 0; bottom: 0; background-color: rgba(255, 0, 0, 0.4); opacity: 0; pointer-events: none; z-index: 90; transition: opacity 0.1s; }
-      .hit-confirm { position: absolute; top: 0; bottom: 0; width: 50%; opacity: 0; transform: scale(0.54); pointer-events: none; z-index: 91; mix-blend-mode: screen; }
-      .hit-confirm.active { animation: hit-confirm-pop 0.42s ease-out; }
-      @keyframes hit-confirm-pop { 0% { opacity: 0; transform: scale(0.46); } 18% { opacity: 0.86; transform: scale(0.62); } 100% { opacity: 0; transform: scale(0.94); } }
+      /* Hit indicator (per-half overlay). Three layered children — a radial
+         burst, an expanding ring, and a damage number — all anchored to
+         (--hit-x, --hit-y) and sized by --hit-power (0..1). The whole
+         set is triggered together by toggling .active on the parent. */
+      .hit-confirm {
+        position: absolute; top: 0; bottom: 0; width: 50%;
+        pointer-events: none; z-index: 91; overflow: hidden;
+      }
+      .hit-confirm .burst,
+      .hit-confirm .ring,
+      .hit-confirm .damage {
+        position: absolute;
+        left: var(--hit-x, 50%); top: var(--hit-y, 50%);
+        opacity: 0;
+        will-change: transform, opacity;
+      }
+      .hit-confirm .burst {
+        width:  calc(140px + 320px * var(--hit-power, 0.4));
+        height: calc(140px + 320px * var(--hit-power, 0.4));
+        margin-left: calc(-1 * (140px + 320px * var(--hit-power, 0.4)) / 2);
+        margin-top:  calc(-1 * (140px + 320px * var(--hit-power, 0.4)) / 2);
+        border-radius: 50%;
+        background: radial-gradient(circle,
+          rgba(255, 245, 200, 0.95) 0%,
+          rgba(255, 180, 60, 0.75) 30%,
+          rgba(255, 80, 20, 0.35) 60%,
+          rgba(255, 60, 20, 0) 75%);
+        mix-blend-mode: screen;
+        filter: blur(2px);
+      }
+      .hit-confirm .ring {
+        width:  calc(110px + 360px * var(--hit-power, 0.4));
+        height: calc(110px + 360px * var(--hit-power, 0.4));
+        margin-left: calc(-1 * (110px + 360px * var(--hit-power, 0.4)) / 2);
+        margin-top:  calc(-1 * (110px + 360px * var(--hit-power, 0.4)) / 2);
+        border-radius: 50%;
+        border: calc(3px + 5px * var(--hit-power, 0.4)) solid rgba(255, 220, 130, 0.85);
+        mix-blend-mode: screen;
+      }
+      .hit-confirm .damage {
+        font-family: sans-serif;
+        font-weight: 900;
+        font-size: calc(28px + 70px * var(--hit-power, 0.4));
+        color: #fff;
+        letter-spacing: 2px;
+        white-space: nowrap;
+        text-shadow:
+          0 0 14px rgba(255, 200, 80, 0.95),
+          0 4px 14px rgba(0, 0, 0, 0.9),
+          2px 2px 0 #c2410c,
+         -2px 2px 0 #c2410c;
+        transform: translate(-50%, -50%);
+      }
+      .hit-confirm.active .burst  { animation: hit-burst  500ms cubic-bezier(0.2, 0.7, 0.2, 1) forwards; }
+      .hit-confirm.active .ring   { animation: hit-ring   620ms cubic-bezier(0.2, 0.7, 0.2, 1) forwards; }
+      .hit-confirm.active .damage { animation: hit-damage 760ms cubic-bezier(0.2, 0.7, 0.2, 1) forwards; }
+      @keyframes hit-burst {
+        0%   { opacity: 0;   transform: scale(0.25); }
+        18%  { opacity: 1;   transform: scale(1.05); }
+        50%  { opacity: 0.7; transform: scale(1.15); }
+        100% { opacity: 0;   transform: scale(1.45); }
+      }
+      @keyframes hit-ring {
+        0%   { opacity: 0;   transform: scale(0.2);  border-width: calc(4px + 6px * var(--hit-power, 0.4)); }
+        15%  { opacity: 0.95; transform: scale(0.55); }
+        100% { opacity: 0;   transform: scale(1.7);  border-width: 1px; }
+      }
+      @keyframes hit-damage {
+        0%   { opacity: 0; transform: translate(-50%, -50%)            scale(0.4); }
+        15%  { opacity: 1; transform: translate(-50%, calc(-50% - 14px)) scale(1.2); }
+        70%  { opacity: 1; transform: translate(-50%, calc(-50% - 44px)) scale(1.0); }
+        100% { opacity: 0; transform: translate(-50%, calc(-50% - 64px)) scale(0.92); }
+      }
       .dazed-indicator { position: absolute; top: 0; left: 0; right: 0; bottom: 0; backdrop-filter: blur(var(--dazed-blur, 0px)) saturate(0.52); filter: contrast(1.06); opacity: 0; pointer-events: none; z-index: 91; transition: opacity var(--dazed-duration, 900ms) ease-out, backdrop-filter var(--dazed-duration, 900ms) ease-out; }
       .dazed-indicator.active { opacity: 1; }
       .blackout-overlay { position: absolute; top: 0; left: 0; right: 0; bottom: 0; background: #000; opacity: 0; pointer-events: none; z-index: 92; transition: opacity 0.08s linear; }
+      /* Intro fade-to-black */
+      #intro-fade { position: fixed; inset: 0; background: #000; opacity: 0; pointer-events: none; z-index: 200; transition: opacity 700ms ease; }
+      #intro-fade.active { opacity: 1; }
+      /* START GAME — translucent gray pill, same family as the live-debug button but centered + larger. */
+      #start-game-btn {
+        position: fixed; left: 50%; top: 50%;
+        transform: translate(-50%, -50%);
+        z-index: 210;
+        padding: 22px 56px;
+        border: 1px solid rgba(255, 255, 255, 0.18);
+        border-radius: 14px;
+        background: rgba(0, 0, 0, 0.7);
+        color: #fff;
+        font-weight: 700; font-family: sans-serif; font-size: 24px;
+        letter-spacing: 6px; cursor: pointer;
+        box-shadow: 0 12px 36px rgba(0, 0, 0, 0.55);
+      }
+      #start-game-btn:hover { background: rgba(0, 0, 0, 0.85); }
+      #start-game-btn:active { transform: translate(-50%, -50%) scale(0.97); }
+      #start-game-btn.hidden { display: none; }
+
+      /* Room-code display under the START GAME button. Hidden once gameplay begins. */
+      #room-code-label {
+        position: fixed; left: 50%; top: calc(50% + 80px);
+        transform: translateX(-50%);
+        z-index: 209; pointer-events: none;
+        text-align: center;
+        font-family: sans-serif;
+        background: rgba(0, 0, 0, 0.55);
+        border: 1px solid rgba(255, 255, 255, 0.12);
+        border-radius: 12px;
+        padding: 12px 22px;
+        color: rgba(255, 255, 255, 0.7);
+        font-size: 11px; font-weight: 700; letter-spacing: 3px;
+      }
+      #room-code-label .code {
+        display: block;
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        font-size: 36px; font-weight: 900;
+        letter-spacing: 14px;
+        color: #fff;
+        margin-top: 6px;
+        text-shadow: 0 0 16px rgba(255, 255, 255, 0.35);
+      }
+      #room-code-label.hidden { display: none; }
+
+      /* Restart button — same chip family as live-debug, top-right. */
+      #restart-btn {
+        position: fixed; top: 12px; right: 156px; z-index: 120;
+        padding: 10px 14px; border: none; border-radius: 8px;
+        background: rgba(0, 0, 0, 0.7); color: #fff;
+        font-weight: 700; font-family: sans-serif; font-size: 13px;
+        letter-spacing: 1px; cursor: pointer;
+      }
+      #restart-btn:hover { background: rgba(0, 0, 0, 0.85); }
+      #restart-btn.hidden { display: none; }
+
+      /* Per-player connection indicators — top-center, dark pills. */
+      #conn-indicators {
+        position: fixed; top: 12px; left: 50%;
+        transform: translateX(-50%);
+        z-index: 120;
+        display: flex; gap: 10px;
+        font-family: sans-serif; font-size: 12px; font-weight: 700;
+        letter-spacing: 1px;
+      }
+      .conn-pill {
+        padding: 6px 12px; border-radius: 999px;
+        background: rgba(0, 0, 0, 0.7);
+        color: #6b7280;
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        display: flex; align-items: center; gap: 6px;
+        transition: color 200ms ease;
+      }
+      .conn-pill .dot {
+        width: 9px; height: 9px; border-radius: 50%;
+        background: #6b7280;
+        transition: background 200ms ease, box-shadow 200ms ease;
+      }
+      .conn-pill.connected.p1       { color: #ff8a8a; }
+      .conn-pill.connected.p1 .dot  { background: #ff5555; box-shadow: 0 0 10px rgba(255, 85, 85, 0.7); }
+      .conn-pill.connected.p2       { color: #8a8aff; }
+      .conn-pill.connected.p2 .dot  { background: #5555ff; box-shadow: 0 0 10px rgba(85, 85, 255, 0.7); }
+
+      /* Round timer — top-center, big tabular numerals. */
+      #round-timer {
+        position: fixed; top: 48px; left: 50%;
+        transform: translateX(-50%);
+        z-index: 110;
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        font-size: 38px; font-weight: 900; letter-spacing: 4px;
+        color: #fff;
+        text-shadow: 0 2px 6px rgba(0,0,0,0.85);
+        font-variant-numeric: tabular-nums;
+        opacity: 0;
+        transition: opacity 300ms ease, color 200ms ease, text-shadow 200ms ease;
+        pointer-events: none;
+      }
+      body.game-active #round-timer { opacity: 1; }
+      #round-timer.danger {
+        color: #ef4444;
+        text-shadow: 0 0 18px rgba(239, 68, 68, 0.8), 0 2px 6px rgba(0,0,0,0.9);
+        animation: round-timer-pulse 1s ease-in-out infinite;
+      }
+      @keyframes round-timer-pulse {
+        0%,100% { transform: translateX(-50%) scale(1); }
+        50%     { transform: translateX(-50%) scale(1.08); }
+      }
+
+      /* Winner banner — half-screen overlay on the winning player's view. */
+      .winner-banner {
+        position: absolute; top: 0; bottom: 0; width: 50%;
+        display: none; align-items: center; justify-content: center;
+        z-index: 95; pointer-events: none;
+        font-family: sans-serif; font-weight: 900;
+        text-align: center;
+      }
+      .winner-banner.show { display: flex; }
+      .winner-banner .text {
+        font-size: 108px;
+        color: #fff;
+        text-shadow: 0 0 36px rgba(255, 255, 255, 0.7), 0 6px 24px rgba(0, 0, 0, 0.9);
+        animation: winner-pop 700ms cubic-bezier(0.2, 0.7, 0.2, 1) forwards;
+      }
+      .winner-banner .sub {
+        position: absolute; left: 0; right: 0; bottom: 18%;
+        font-size: 20px; letter-spacing: 8px; font-weight: 700;
+        color: rgba(255, 255, 255, 0.85);
+        text-shadow: 0 2px 8px rgba(0, 0, 0, 0.9);
+      }
+      .winner-banner.p1 { background: rgba(255, 85, 85, 0.22); }
+      .winner-banner.p1 .text { color: #ffd2d2; text-shadow: 0 0 36px rgba(255, 85, 85, 0.9), 0 6px 24px rgba(0, 0, 0, 0.9); }
+      .winner-banner.p2 { background: rgba(85, 85, 255, 0.22); }
+      .winner-banner.p2 .text { color: #d2d2ff; text-shadow: 0 0 36px rgba(85, 85, 255, 0.9), 0 6px 24px rgba(0, 0, 0, 0.9); }
+      .winner-banner.draw { width: 100%; left: 0; background: rgba(0, 0, 0, 0.55); }
+      .winner-banner.draw .text { color: #fff; }
+      @keyframes winner-pop {
+        0%   { transform: scale(0.4)  rotate(-3deg); opacity: 0; }
+        20%  { transform: scale(1.2)  rotate(2deg);  opacity: 1; }
+        60%  { transform: scale(1.0)  rotate(0deg);  opacity: 1; }
+        100% { transform: scale(1.05) rotate(0deg);  opacity: 1; }
+      }
+
+      /* ---- Camera-pan (KO cinematic) overlays ---------------------------------
+         When body.pan-active is on:
+           * The split-screen seam, HUD bars, round timer, connection pills,
+             and the half-screen winner banners are hidden.
+           * Two full-height side banners appear:
+               left  = WINNER
+               right = KO (or TIME for a time-out win — currently only KO panes,
+                           but the right-side text is data-driven so it works
+                           if we ever add time-out cinematics).
+      ----------------------------------------------------------------------- */
+      body.pan-active #info,
+      body.pan-active #divider,
+      body.pan-active #round-timer,
+      body.pan-active #conn-indicators,
+      body.pan-active .winner-banner { display: none !important; }
+      /* Clear both per-half blackout overlays so the loser's full-opacity
+         KO blackout doesn't cover half of the cinematic. */
+      body.pan-active .blackout-overlay { opacity: 0 !important; }
+
+      .pan-banner {
+        position: absolute; top: 0; bottom: 0; width: 50%;
+        display: none; align-items: center; justify-content: center;
+        z-index: 96; pointer-events: none;
+        font-family: sans-serif; font-weight: 900;
+        font-size: 72px;
+        color: #fff;
+        text-shadow: 0 0 48px rgba(255, 255, 255, 0.55), 0 6px 28px rgba(0, 0, 0, 0.9);
+      }
+      .pan-banner-left  { left: 0;   }
+      .pan-banner-right { left: 50%; }
+      body.pan-active .pan-banner {
+        display: flex;
+        animation: winner-pop 700ms cubic-bezier(0.2, 0.7, 0.2, 1) forwards;
+      }
+      /* Tint the banners by winning side so the player colours read at a glance. */
+      body.pan-active.winner-p1 .pan-banner {
+        color: #ffd2d2;
+        text-shadow: 0 0 48px rgba(255, 85, 85, 0.95), 0 6px 28px rgba(0, 0, 0, 0.9);
+      }
+      body.pan-active.winner-p2 .pan-banner {
+        color: #d2d2ff;
+        text-shadow: 0 0 48px rgba(85, 85, 255, 0.95), 0 6px 28px rgba(0, 0, 0, 0.9);
+      }
+      /* Countdown overlay (3 / 2 / 1 / FIGHT) */
+      #countdown {
+        position: fixed; left: 50%; top: 50%; transform: translate(-50%, -50%);
+        z-index: 220; display: none; pointer-events: none;
+        font-family: sans-serif; font-weight: 900; font-size: 200px;
+        color: #fff; letter-spacing: 8px; line-height: 1;
+        text-shadow: 0 0 36px rgba(255, 220, 130, 0.7), 0 4px 18px rgba(0, 0, 0, 0.85);
+      }
+      #countdown.show { display: block; animation: countdown-pulse 800ms ease-out forwards; }
+      #countdown.fight {
+        font-size: 200px; color: #f97316; letter-spacing: 12px;
+        text-shadow: 0 0 50px rgba(255, 100, 0, 1), 0 6px 24px rgba(0, 0, 0, 0.9);
+      }
+      @keyframes countdown-pulse {
+        0%   { opacity: 0; transform: translate(-50%, -50%) scale(0.45); }
+        18%  { opacity: 1; transform: translate(-50%, -50%) scale(1.15); }
+        65%  { opacity: 1; transform: translate(-50%, -50%) scale(1.0); }
+        100% { opacity: 0; transform: translate(-50%, -50%) scale(0.92); }
+      }
     </style>
   </head>
   <body>
     <div id="flash-p1" class="hit-flash" style="right: 50%"></div>
     <div id="flash-p2" class="hit-flash" style="left: 50%"></div>
-    <div id="hit-confirm-p1" class="hit-confirm" style="left: 0"></div>
-    <div id="hit-confirm-p2" class="hit-confirm" style="left: 50%"></div>
+    <div id="hit-confirm-p1" class="hit-confirm" style="left: 0">
+      <div class="burst"></div>
+      <div class="ring"></div>
+      <div class="damage"></div>
+    </div>
+    <div id="hit-confirm-p2" class="hit-confirm" style="left: 50%">
+      <div class="burst"></div>
+      <div class="ring"></div>
+      <div class="damage"></div>
+    </div>
     <div id="dazed-p1" class="dazed-indicator" style="right: 50%"></div>
     <div id="dazed-p2" class="dazed-indicator" style="left: 50%"></div>
     <div id="blackout-p1" class="blackout-overlay" style="right: 50%"></div>
@@ -39,6 +342,32 @@
       <div class="hud-p2">Player 2<br /><div class="bar-container health-bar-container"><div id="hp-p2" class="health-bar"></div></div><div class="bar-container stamina-bar-container"><div id="stamina-p2" class="stamina-bar"></div></div><div class="bar-container combo-bar-container"><div id="combo-p2" class="combo-bar"></div></div><span style="font-size: 14px; display: inline-block; margin-top: 5px"></span></div>
     </div>
     <div id="divider"></div>
+    <div id="intro-fade"></div>
+    <div id="countdown"></div>
+    <button id="start-game-btn" type="button">START GAME</button>
+    <div id="room-code-label">
+      ROOM CODE
+      <span class="code" id="room-code-value">----</span>
+    </div>
+    <button id="restart-btn" type="button" class="hidden">RESTART</button>
+    <div id="conn-indicators">
+      <div class="conn-pill p1" id="conn-p1"><span class="dot"></span>P1</div>
+      <div class="conn-pill p2" id="conn-p2"><span class="dot"></span>P2</div>
+    </div>
+    <div id="round-timer">00:00</div>
+    <div id="winner-p1" class="winner-banner p1" style="left: 0">
+      <div class="text">WINNER</div>
+      <div class="sub" id="winner-p1-sub"></div>
+    </div>
+    <div id="winner-p2" class="winner-banner p2" style="left: 50%">
+      <div class="text">WINNER</div>
+      <div class="sub" id="winner-p2-sub"></div>
+    </div>
+    <div id="winner-draw" class="winner-banner draw">
+      <div class="text">DRAW</div>
+    </div>
+    <div class="pan-banner pan-banner-left"  id="pan-banner-left">WINNER</div>
+    <div class="pan-banner pan-banner-right" id="pan-banner-right">KO</div>
     <script async src="https://unpkg.com/es-module-shims@1.8.0/dist/es-module-shims.js"></script>
     <script type="importmap">
       {
